@@ -64,45 +64,47 @@ def process_message(message, db: Session):
         logger.error(f"An unexpected error occurred in worker: {e}")
 
 def main():
-    consumer = None
-    db = get_db_session()
-    
-    max_retries = 5
-    retry_delay = 15  # seconds
-    for attempt in range(max_retries):
-        try:
-            logger.info(f"Worker connecting to Kafka (attempt {attempt + 1}/{max_retries})...")
-            consumer = KafkaConsumer(
-                settings.KAFKA_CUSTOMER_TOPIC,
-                bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
-                auto_offset_reset='earliest',
-                group_id='stripe-sync-worker-group',
-                consumer_timeout_ms=10000,
-                # Short timeout to fail fast on connection attempts
-                request_timeout_ms=15000 
-            )
-            logger.info("Successfully connected to Kafka.")
-            break  # Exit loop on successful connection
-        except Exception as e:
-            logger.error(f"Failed to connect to Kafka: {e}")
-            if attempt < max_retries - 1:
-                logger.info(f"Retrying in {retry_delay} seconds...")
-                time.sleep(retry_delay)
-            else:
-                logger.error("Could not connect to Kafka after several retries. Exiting.")
-                if db: db.close()
-                return
+    """The main function for the worker, runs in an infinite loop."""
+    db: Session = None
+    consumer: KafkaConsumer = None
 
-    try:
-        logger.info("Worker listening for messages...")
-        for message in consumer:
-            process_message(message, db)
-    except Exception as e:
-        logger.error(f"Worker failed while processing messages: {e}")
-    finally:
-        if db: db.close()
-        if consumer: consumer.close()
-        logger.info("Worker shutting down.")
+    while True:
+        try:
+            # Ensure we have a valid DB session
+            if not db or not db.is_active:
+                if db:
+                    db.close()
+                db = get_db_session()
+                logger.info("Database session established/re-established.")
+
+            # Setup Kafka consumer
+            if not consumer:
+                logger.info("Connecting to Kafka...")
+                consumer = KafkaConsumer(
+                    settings.KAFKA_CUSTOMER_TOPIC,
+                    bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
+                    auto_offset_reset='earliest',
+                    group_id='stripe-sync-worker-group',
+                    request_timeout_ms=15000
+                )
+                logger.info("Successfully connected to Kafka. Listening for messages...")
+
+            # This will block until a message is received
+            for message in consumer:
+                process_message(message, db)
+
+        except Exception as e:
+            logger.error(f"An error occurred in the main worker loop: {e}")
+            # Clean up resources before retrying
+            if consumer:
+                consumer.close()
+                consumer = None
+            if db:
+                db.close()
+                db = None
+            
+            logger.info("Retrying in 15 seconds...")
+            time.sleep(15)
 
 if __name__ == "__main__":
     main()
