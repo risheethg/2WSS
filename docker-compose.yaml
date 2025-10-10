@@ -52,6 +52,8 @@ services:
       - .env
     ports:
       - "8000:8000"
+    volumes:
+      - ./logs:/app/logs
     depends_on:
       db:
         condition: service_healthy
@@ -59,6 +61,17 @@ services:
         condition: service_healthy
     command: >
       sh -c "alembic upgrade head && python worker.py & uvicorn main:app --reload --host 0.0.0.0 --port 8000"
+
+  kafdrop:
+    image: obsidiandynamics/kafdrop:latest
+    container_name: kafdrop
+    ports:
+      - "19000:9000"
+    environment:
+      KAFKA_BROKERCONNECT: "kafka:29092"
+    depends_on:
+      kafka:
+        condition: service_healthy
 
 volumes:
   postgres_data:
