@@ -4,15 +4,18 @@ from app.models import customer as customer_model
 
 
 class CustomerRepo:
-    def get(self, db: Session, customer_id: int) -> Optional[customer_model.Customer]:
-        return db.query(customer_model.Customer).filter(customer_model.Customer.id == customer_id).first()
+    def get(self, db: Session, customer_id: int, include_inactive: bool = False) -> Optional[customer_model.Customer]:
+        query = db.query(customer_model.Customer).filter(customer_model.Customer.id == customer_id)
+        if not include_inactive:
+            query = query.filter(customer_model.Customer.is_active == True)
+        return query.first()
     
     # ADD THIS NEW METHOD
     def get_by_email(self, db: Session, email: str) -> Optional[customer_model.Customer]:
         return db.query(customer_model.Customer).filter(customer_model.Customer.email == email).first()
 
     def get_all(self, db: Session, skip: int = 0, limit: int = 100) -> List[customer_model.Customer]:
-        return db.query(customer_model.Customer).offset(skip).limit(limit).all()
+        return db.query(customer_model.Customer).filter(customer_model.Customer.is_active == True).offset(skip).limit(limit).all()
 
     def create(self, db: Session, customer: customer_model.CustomerCreate) -> customer_model.Customer:
         db_customer = customer_model.Customer(name=customer.name, email=customer.email)
