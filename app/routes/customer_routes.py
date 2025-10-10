@@ -3,21 +3,31 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from app.core.database import get_db
+from app.repos.customer_repo import customer_repo
 from app.services.customer_service import customer_service
 from app.models import customer as customer_model
 from app.core.response import response_handler
+
+#dependencies
+def get_customer_repo():
+    return customer_repo
 
 router = APIRouter(prefix="/customers", tags=["customers"])
 
 @router.post("/", status_code=status.HTTP_201_CREATED)
 def create_customer(
     customer: customer_model.CustomerCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    customer_repo = Depends(get_customer_repo)
 ):
-    # We could add a check here for existing email if needed
+
+    existing_customer = customer_repo.get_by_email(db, email=customer.email)
+    if existing_customer:
+        return response_handler.failure(message="A customer with this email already exists.", status_code=409)
+
     new_customer = customer_service.create_customer(db=db, customer=customer)
     return response_handler.success(
-        data=customer_model.CustomerInDB.from_orm(new_customer),
+        data=customer_model.CustomerInDB.from_orm(new_customer).model_dump(),
         message="Customer created successfully",
         status_code=status.HTTP_201_CREATED
     )
@@ -30,7 +40,7 @@ def read_customers(
     db: Session = Depends(get_db)
 ):
     customers = customer_service.get_all_customers(db, skip=skip, limit=limit)
-    customers_in_db = [customer_model.CustomerInDB.from_orm(c) for c in customers]
+    customers_in_db = [customer_model.CustomerInDB.from_orm(c).model_dump() for c in customers]
     return response_handler.success(data=customers_in_db)
 
 
@@ -42,7 +52,7 @@ def read_customer(
     db_customer = customer_service.get_customer(db, customer_id=customer_id)
     if db_customer is None:
         return response_handler.failure(message="Customer not found", status_code=404)
-    return response_handler.success(data=customer_model.CustomerInDB.from_orm(db_customer))
+    return response_handler.success(data=customer_model.CustomerInDB.from_orm(db_customer).model_dump())
 
 
 @router.put("/{customer_id}")
@@ -55,7 +65,7 @@ def update_customer(
     if db_customer is None:
         return response_handler.failure(message="Customer not found", status_code=404)
     return response_handler.success(
-        data=customer_model.CustomerInDB.from_orm(db_customer),
+        data=customer_model.CustomerInDB.from_orm(db_customer).model_dump(),
         message="Customer updated successfully"
     )
 
@@ -69,6 +79,6 @@ def delete_customer(
     if db_customer is None:
         return response_handler.failure(message="Customer not found", status_code=404)
     return response_handler.success(
-        data=customer_model.CustomerInDB.from_orm(db_customer),
+        data=customer_model.CustomerInDB.from_orm(db_customer).model_dump(),
         message="Customer deleted successfully"
     )
