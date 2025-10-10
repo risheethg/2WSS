@@ -117,10 +117,24 @@ class LoggerConfig:
         except Exception as e:
             print(f"Failed to write logs: {str(e)}")
  
-# Usage Example
-logs = LoggerConfig(
-    env=settings.LOGGER, 
-    logger_name="APP-BE", 
-    log_directory="logger", 
-    log_file="app.log"
+def create_logger(env, logger_name, log_directory, log_file):
+    return LoggerConfig(
+        env=env,
+        logger_name=logger_name,
+        log_directory=log_directory,
+        log_file=log_file,
+    ).logger
+
+logger = create_logger(
+    env=settings.LOGGER,
+    logger_name="Zenskar",
+    log_directory="logs",
+    log_file="app.log",
+)
+
+worker_logger = create_logger(
+    env="WARNING",
+    logger_name="ZenskarWorker",
+    log_directory="logs",
+    log_file="worker.log",
 )
