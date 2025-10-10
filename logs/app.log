@@ -1,0 +1,6 @@
+2025-10-10 17:30:53,601 - Zenskar - INFO - Sent event 'customer_created' for customer ID 5 to Kafka.
+2025-10-10 17:34:21,485 - Zenskar - INFO - Sent event 'customer_deleted' for customer ID 4 to Kafka.
+2025-10-10 17:37:00,179 - Zenskar - INFO - Sent event 'customer_updated' for customer ID 3 to Kafka.
+2025-10-10 17:52:16,789 - Zenskar - INFO - Sent event 'customer_created' for customer ID 6, realtimesynctest to Kafka.
+2025-10-10 17:53:19,422 - Zenskar - INFO - Sent event 'customer_updated' for customer ID 6, realtimesynctesteditedandtobedeleted to Kafka.
+2025-10-10 17:53:46,252 - Zenskar - INFO - Sent event 'customer_deleted' for customer ID 6, realtimesynctesteditedandtobedeleted to Kafka.

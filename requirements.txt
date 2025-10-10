@@ -5,3 +5,7 @@ psycopg2-binary
 pydantic[email]
 pydantic-settings
 alembic
+kafka-python
+stripe
+kafka-python
+stripe

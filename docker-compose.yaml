@@ -1,6 +1,33 @@
 version: '3.8'
 
 services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.3
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.3
+    container_name: kafka
+    ports:
+      - "9092:9092"
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   db:
     image: postgres:15
     container_name: zenskar_db
@@ -25,11 +52,26 @@ services:
       - .env
     ports:
       - "8000:8000"
+    volumes:
+      - ./logs:/app/logs
     depends_on:
       db:
         condition: service_healthy
+      kafka:
+        condition: service_healthy
     command: >
-      sh -c "alembic upgrade head && uvicorn main:app --reload --host 0.0.0.0 --port 8000"
+      sh -c "alembic upgrade head && python worker.py & uvicorn main:app --reload --host 0.0.0.0 --port 8000"
+
+  kafdrop:
+    image: obsidiandynamics/kafdrop:latest
+    container_name: kafdrop
+    ports:
+      - "19000:9000"
+    environment:
+      KAFKA_BROKERCONNECT: "kafka:29092"
+    depends_on:
+      kafka:
+        condition: service_healthy
 
 volumes:
   postgres_data:
