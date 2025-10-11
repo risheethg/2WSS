@@ -7,6 +7,8 @@ from app.core.config import settings
 from app.repos.customer_repo import customer_repo
 from app.models import customer as customer_model
 from app.core.logger import logger
+from app.services.conflict_service import conflict_service
+from sqlalchemy.exc import IntegrityError
 
 
 class StripeIntegration(BaseIntegrationService):
@@ -46,7 +48,7 @@ class StripeIntegration(BaseIntegrationService):
                 # Still return success since Stripe customer was created successfully
                 return {"stripe_customer_id": stripe_customer.id}
                 
-        except stripe.error.StripeError as e:
+        except Exception as e:
             logger.error(f"Stripe API error on create: {e}")
             return None
         except Exception as e:
@@ -72,7 +74,7 @@ class StripeIntegration(BaseIntegrationService):
             logger.info(f"Updated Stripe customer {stripe_customer_id}")
             return True
             
-        except stripe.error.StripeError as e:
+        except Exception as e:
             logger.error(f"Stripe API error on update: {e}")
             return False
         except Exception as e:
@@ -94,7 +96,7 @@ class StripeIntegration(BaseIntegrationService):
             logger.info(f"Deleted Stripe customer {stripe_customer_id}")
             return True
             
-        except stripe.error.StripeError as e:
+        except Exception as e:
             logger.error(f"Stripe API error on delete: {e}")
             return False
         except Exception as e:
@@ -125,88 +127,173 @@ class StripeIntegration(BaseIntegrationService):
         try:
             stripe.Webhook.construct_event(payload, signature, secret)
             return True
-        except stripe.error.SignatureVerificationError:
-            logger.error("Invalid Stripe webhook signature")
-            return False
         except Exception as e:
-            logger.error(f"Error verifying Stripe webhook signature: {e}")
-            return False
+            if "SignatureVerificationError" in str(type(e)):
+                logger.error("Invalid Stripe webhook signature")
+                return False
+            else:
+                logger.error(f"Error verifying Stripe webhook signature: {e}")
+                return False
 
     def _handle_customer_upsert(self, stripe_customer: dict, db: Session) -> bool:
+        """
+        Handle Stripe customer create/update with improved idempotency and conflict resolution.
+        
+        Features:
+        - Idempotent processing (safe to run multiple times)
+        - Out-of-order event handling (update before create)
+        - Email conflict resolution with configurable strategies
+        """
         try:
             stripe_customer_id = stripe_customer.get("id")
             email = stripe_customer.get("email", "")
             name = stripe_customer.get("name") or ""
             
-            # Check if we already have this customer linked by Stripe ID
-            customer = customer_repo.get_by_stripe_id(db, stripe_id=stripe_customer_id)
+            logger.info(f"Processing Stripe customer {stripe_customer_id} with email {email}")
             
-            if customer:
-                # Update existing customer linked by Stripe ID
-                logger.info(f"Updating local customer {customer.id} from Stripe event.")
-                try:
-                    # Use the repository update method with proper data structure
-                    update_data = customer_model.CustomerUpdate(name=name, email=email)
-                    
-                    # Only update if email isn't conflicting
-                    if email and email != customer.email:
-                        existing_email_customer = customer_repo.get_by_field(db, "email", email)
-                        if existing_email_customer and existing_email_customer.id != customer.id:
-                            logger.warning(f"Cannot update customer {customer.id} email to {email} - already exists")
-                            # Update only name in this case
-                            update_data = customer_model.CustomerUpdate(name=name, email=customer.email)
-                    
-                    updated_customer = customer_repo.update(db, customer.id, update_data)
-                    if updated_customer:
-                        logger.info(f"Successfully updated customer {customer.id}")
-                    else:
-                        logger.error(f"Failed to update customer {customer.id}")
-                        return False
-                        
-                except Exception as update_error:
-                    logger.error(f"Failed to update customer {customer.id}: {update_error}")
-                    return False
-            else:
-                # Check if customer exists by email
-                existing_by_email = customer_repo.get_by_field(db, "email", email) if email else None
-                
-                if existing_by_email:
-                    if not hasattr(existing_by_email, 'stripe_customer_id') or not existing_by_email.stripe_customer_id:
-                        # Link existing customer to Stripe using the integration method
-                        logger.info(f"Linking existing customer {existing_by_email.id} to Stripe ID {stripe_customer_id}")
-                        try:
-                            customer_data = customer_model.CustomerCreate(name=name, email=email)
-                            customer_repo.create_with_integration_id(
-                                db, customer_data, "stripe_customer_id", stripe_customer_id
-                            )
-                            logger.info(f"Successfully linked customer {existing_by_email.id}")
-                        except Exception as e:
-                            # If creation fails due to duplicate, try updating existing
-                            update_data = customer_model.CustomerUpdate(name=name, email=email)
-                            customer_repo.update(db, existing_by_email.id, update_data)
-                            logger.info(f"Updated existing customer {existing_by_email.id}")
-                    else:
-                        logger.warning(f"Customer with email {email} already linked to Stripe ID {existing_by_email.stripe_customer_id}")
-                elif email:
-                    # Create new customer
-                    logger.info(f"Creating new customer from Stripe for {email}")
-                    customer_data = customer_model.CustomerCreate(name=name, email=email)
-                    try:
-                        new_customer = customer_repo.create_with_integration_id(
-                            db, customer_data, "stripe_customer_id", stripe_customer_id
-                        )
-                        logger.info(f"Successfully created customer for {email}")
-                    except Exception as e:
-                        logger.error(f"Failed to create customer for {email}: {e}")
-                        return False
-                else:
-                    logger.warning(f"Skipping Stripe customer {stripe_customer_id} - no email provided")
+            # Step 1: Check if we already have this customer linked by Stripe ID (idempotency)
+            existing_stripe_customer = customer_repo.get_by_stripe_id(db, stripe_id=stripe_customer_id)
             
-            return True
+            if existing_stripe_customer:
+                # Idempotent update - safe to run multiple times
+                return self._update_existing_stripe_customer(db, existing_stripe_customer, stripe_customer)
+            
+            # Step 2: Handle new customer or out-of-order events
+            return self._handle_new_or_unlinked_customer(db, stripe_customer)
             
         except Exception as e:
             db.rollback()
             logger.error(f"Error handling Stripe customer upsert: {e}")
+            return False
+
+    def _update_existing_stripe_customer(self, db: Session, existing_customer, stripe_customer: dict) -> bool:
+        """Update existing customer that's already linked to Stripe (idempotent)"""
+        stripe_customer_id = stripe_customer.get("id")
+        email = stripe_customer.get("email", "")
+        name = stripe_customer.get("name") or ""
+        
+        try:
+            logger.info(f"Updating existing customer {existing_customer.id} linked to Stripe {stripe_customer_id}")
+            
+            # Check for email conflicts before updating
+            if email and email != existing_customer.email:
+                conflicting_customer = customer_repo.get_by_field(db, "email", email)
+                if conflicting_customer and conflicting_customer.id != existing_customer.id:
+                    logger.warning(f"Email conflict: {email} already belongs to customer {conflicting_customer.id}")
+                    # Keep existing email, only update name
+                    update_data = customer_model.CustomerUpdate(name=name, email=existing_customer.email)
+                else:
+                    # Safe to update both name and email
+                    update_data = customer_model.CustomerUpdate(name=name, email=email)
+            else:
+                # No email change or email is the same
+                update_data = customer_model.CustomerUpdate(name=name, email=existing_customer.email)
+            
+            updated_customer = customer_repo.update(db, existing_customer.id, update_data)
+            if updated_customer:
+                logger.info(f"Successfully updated customer {existing_customer.id}")
+                return True
+            else:
+                logger.error(f"Failed to update customer {existing_customer.id}")
+                return False
+                
+        except IntegrityError as integrity_error:
+            # Handle email constraint violations
+            db.rollback()
+            success, message = conflict_service.handle_email_conflict(db, stripe_customer, integrity_error)
+            logger.info(f"Handled email conflict: {message}")
+            return success
+            
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Failed to update existing Stripe customer {stripe_customer_id}: {e}")
+            return False
+
+    def _handle_new_or_unlinked_customer(self, db: Session, stripe_customer: dict) -> bool:
+        """Handle new customer or out-of-order events (customer not yet linked to Stripe)"""
+        stripe_customer_id = stripe_customer.get("id")
+        email = stripe_customer.get("email", "")
+        name = stripe_customer.get("name") or ""
+        
+        if not email:
+            logger.warning(f"Skipping Stripe customer {stripe_customer_id} - no email provided")
+            return True  # Not an error, just skip
+        
+        # Check if a local customer exists with this email (out-of-order handling)
+        existing_by_email = customer_repo.get_by_field(db, "email", email)
+        
+        if existing_by_email:
+            return self._link_existing_customer_to_stripe(db, existing_by_email, stripe_customer)
+        else:
+            return self._create_new_customer_from_stripe(db, stripe_customer)
+
+    def _link_existing_customer_to_stripe(self, db: Session, existing_customer, stripe_customer: dict) -> bool:
+        """Link existing local customer to Stripe (handles out-of-order events)"""
+        stripe_customer_id = stripe_customer.get("id")
+        name = stripe_customer.get("name") or ""
+        
+        try:
+            if existing_customer.stripe_customer_id:
+                logger.warning(f"Customer {existing_customer.id} already linked to Stripe {existing_customer.stripe_customer_id}")
+                return True  # Already linked, idempotent
+            
+            # Link existing customer to Stripe
+            logger.info(f"Linking existing customer {existing_customer.id} to Stripe {stripe_customer_id}")
+            
+            # Update the existing customer with Stripe ID and potentially new name
+            db_customer = db.query(customer_model.Customer).filter(
+                customer_model.Customer.id == existing_customer.id
+            ).first()
+            
+            if db_customer:
+                db_customer.stripe_customer_id = stripe_customer_id
+                if name:  # Update name if provided
+                    db_customer.name = name
+                db.commit()
+                logger.info(f"Successfully linked customer {existing_customer.id} to Stripe")
+                return True
+            else:
+                logger.error(f"Could not find customer {existing_customer.id} to link")
+                return False
+                
+        except IntegrityError as integrity_error:
+            # This shouldn't happen if we checked properly, but just in case
+            db.rollback()
+            success, message = conflict_service.handle_email_conflict(db, stripe_customer, integrity_error)
+            logger.info(f"Handled unexpected email conflict during linking: {message}")
+            return success
+            
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Failed to link customer {existing_customer.id} to Stripe: {e}")
+            return False
+
+    def _create_new_customer_from_stripe(self, db: Session, stripe_customer: dict) -> bool:
+        """Create new local customer from Stripe data"""
+        stripe_customer_id = stripe_customer.get("id")
+        email = stripe_customer.get("email", "")
+        name = stripe_customer.get("name") or ""
+        
+        try:
+            logger.info(f"Creating new customer from Stripe for {email}")
+            customer_data = customer_model.CustomerCreate(name=name, email=email)
+            
+            new_customer = customer_repo.create_with_integration_id(
+                db, customer_data, "stripe_customer_id", stripe_customer_id
+            )
+            logger.info(f"Successfully created customer {new_customer.id} for Stripe {stripe_customer_id}")
+            return True
+            
+        except IntegrityError as integrity_error:
+            # Handle email constraint violations
+            db.rollback()
+            success, message = conflict_service.handle_email_conflict(db, stripe_customer, integrity_error)
+            logger.info(f"Handled email conflict during creation: {message}")
+            return success
+            
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Failed to create customer for Stripe {stripe_customer_id}: {e}")
             return False
 
     def _handle_customer_deleted(self, stripe_customer: dict, db: Session) -> bool:
