@@ -42,4 +42,32 @@ class CustomerRepo:
             db.refresh(db_customer)
         return db_customer
 
+    # METHODS FOR STRIPE INTEGRATION
+    def get_by_stripe_id(self, db: Session, stripe_id: str) -> Optional[customer_model.Customer]:
+        return db.query(customer_model.Customer).filter(customer_model.Customer.stripe_customer_id == stripe_id).first()
+
+    def create_with_stripe_id(self, db: Session, customer: customer_model.CustomerCreate, stripe_id: str) -> customer_model.Customer:
+        db_customer = customer_model.Customer(name=customer.name, email=customer.email, stripe_customer_id=stripe_id)
+        db.add(db_customer)
+        db.commit()
+        db.refresh(db_customer)
+        return db_customer
+
+    def update_by_stripe_id(self, db: Session, stripe_id: str, customer_data: customer_model.CustomerUpdate) -> Optional[customer_model.Customer]:
+        db_customer = self.get_by_stripe_id(db, stripe_id)
+        if db_customer:
+            db_customer.name = customer_data.name
+            db_customer.email = customer_data.email
+            db.commit()
+            db.refresh(db_customer)
+        return db_customer
+
+    def delete_by_stripe_id(self, db: Session, stripe_id: str) -> Optional[customer_model.Customer]:
+        db_customer = self.get_by_stripe_id(db, stripe_id)
+        if db_customer:
+            # If you have a soft delete (is_active=False), you would implement that here.
+            db.delete(db_customer)
+            db.commit()
+        return db_customer
+
 customer_repo = CustomerRepo()
