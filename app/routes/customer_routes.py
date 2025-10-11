@@ -12,7 +12,7 @@ from app.core.response import response_handler
 def get_customer_repo():
     return customer_repo
 
-router = APIRouter(prefix="/customers", tags=["customers"])
+router = APIRouter(prefix="/customers", tags=["Customers"])
 
 @router.post("/")
 def create_customer(

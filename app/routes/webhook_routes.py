@@ -11,7 +11,7 @@ from app.integrations.base import InwardIntegrationService
 
 router = APIRouter(
     prefix="/webhooks",
-    tags=["webhooks"]
+    tags=["Webhooks"]
 )
 
 def get_integration_webhook_secrets() -> Dict[str, str]:

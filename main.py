@@ -2,9 +2,8 @@ from fastapi import FastAPI
 from app.routes import customer_routes, webhook_routes 
 
 app = FastAPI(
-    title="Zenskar Integration Service",
-    description="A service to manage and sync customer catalogs.",
-    version="1.0.0"
+    title="Zenskar Two-Way Integration Service",
+    description="A service to manage and sync customer catalogs."
 )
 
 app.include_router(customer_routes.router)
