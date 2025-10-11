@@ -7,3 +7,4 @@ pydantic-settings
 alembic
 kafka-python
 stripe
+redis[hiredis]

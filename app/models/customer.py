@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String, Boolean
+from sqlalchemy.orm import relationship
 from pydantic import BaseModel, EmailStr
 from typing import Optional
 
@@ -12,6 +13,9 @@ class Customer(Base):
     email = Column(String, unique=True, index=True)
     stripe_customer_id = Column(String, unique=True, index=True, nullable=True)
     is_active = Column(Boolean, default=True)
+    
+    # Relationship to integration sync states
+    integration_sync_states = relationship("IntegrationSyncState", back_populates="customer", cascade="all, delete-orphan")
 
 
 class CustomerBase(BaseModel):
