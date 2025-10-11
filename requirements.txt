@@ -7,5 +7,3 @@ pydantic-settings
 alembic
 kafka-python
 stripe
-kafka-python
-stripe

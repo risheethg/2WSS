@@ -1,0 +1,62 @@
+"""
+Invoice Models
+
+Example of how easy it is to add new entity types with the repository pattern.
+"""
+
+from sqlalchemy import Column, Integer, String, Numeric, DateTime, ForeignKey, Boolean
+from pydantic import BaseModel
+from typing import Optional
+from datetime import datetime
+from decimal import Decimal as PyDecimal
+
+from app.core.database import Base
+
+
+class Invoice(Base):
+    """Invoice database model"""
+    __tablename__ = "invoices"
+
+    id = Column(Integer, primary_key=True, index=True)
+    customer_id = Column(Integer, ForeignKey("customers.id"))
+    amount = Column(Numeric(10, 2), nullable=False)
+    currency = Column(String, default="USD")
+    status = Column(String, default="draft")  # draft, sent, paid, cancelled
+    invoice_number = Column(String, unique=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    due_date = Column(DateTime)
+    is_active = Column(Boolean, default=True)
+    
+    # Integration fields
+    stripe_invoice_id = Column(String, unique=True, nullable=True)
+    quickbooks_invoice_id = Column(String, unique=True, nullable=True)
+
+
+class InvoiceBase(BaseModel):
+    customer_id: int
+    amount: PyDecimal
+    currency: str = "USD"
+    status: str = "draft"
+    due_date: Optional[datetime] = None
+
+
+class InvoiceCreate(InvoiceBase):
+    pass
+
+
+class InvoiceUpdate(BaseModel):
+    amount: Optional[PyDecimal] = None
+    currency: Optional[str] = None
+    status: Optional[str] = None
+    due_date: Optional[datetime] = None
+
+
+class InvoiceInDB(InvoiceBase):
+    id: int
+    invoice_number: str
+    created_at: datetime
+    stripe_invoice_id: Optional[str] = None
+    quickbooks_invoice_id: Optional[str] = None
+
+    class Config:
+        from_attributes = True
