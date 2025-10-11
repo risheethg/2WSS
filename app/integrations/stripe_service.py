@@ -8,6 +8,7 @@ from app.repos.customer_repo import customer_repo
 from app.models import customer as customer_model
 from app.core.logger import logger
 from app.services.conflict_service import conflict_service
+from app.services.customer_service import customer_service
 from sqlalchemy.exc import IntegrityError
 
 
@@ -189,7 +190,8 @@ class StripeIntegration(BaseIntegrationService):
                 # No email change or email is the same
                 update_data = customer_model.CustomerUpdate(name=name, email=existing_customer.email)
             
-            updated_customer = customer_repo.update(db, existing_customer.id, update_data)
+            # Use webhook method to prevent circular updates
+            updated_customer = customer_service.update_customer_from_webhook(db, existing_customer.id, update_data)
             if updated_customer:
                 logger.info(f"Successfully updated customer {existing_customer.id}")
                 return True
@@ -240,16 +242,15 @@ class StripeIntegration(BaseIntegrationService):
             # Link existing customer to Stripe
             logger.info(f"Linking existing customer {existing_customer.id} to Stripe {stripe_customer_id}")
             
-            # Update the existing customer with Stripe ID and potentially new name
-            db_customer = db.query(customer_model.Customer).filter(
-                customer_model.Customer.id == existing_customer.id
-            ).first()
+            # Use webhook method to update Stripe ID (prevents circular updates)
+            updated_customer = customer_service.update_stripe_id_from_webhook(db, existing_customer.id, stripe_customer_id)
             
-            if db_customer:
-                db_customer.stripe_customer_id = stripe_customer_id
-                if name:  # Update name if provided
-                    db_customer.name = name
-                db.commit()
+            if updated_customer and name and name != existing_customer.name:
+                # Also update name if provided and different
+                update_data = customer_model.CustomerUpdate(name=name, email=existing_customer.email)
+                customer_service.update_customer_from_webhook(db, existing_customer.id, update_data)
+            
+            if updated_customer:
                 logger.info(f"Successfully linked customer {existing_customer.id} to Stripe")
                 return True
             else:
@@ -276,11 +277,15 @@ class StripeIntegration(BaseIntegrationService):
         
         try:
             logger.info(f"Creating new customer from Stripe for {email}")
+            # Create customer data with Stripe ID
             customer_data = customer_model.CustomerCreate(name=name, email=email)
             
-            new_customer = customer_repo.create_with_integration_id(
-                db, customer_data, "stripe_customer_id", stripe_customer_id
-            )
+            # Use webhook method to prevent circular updates
+            new_customer = customer_service.create_customer_from_webhook(db, customer_data)
+            
+            # Now link to Stripe ID using webhook method
+            customer_service.update_stripe_id_from_webhook(db, new_customer.id, stripe_customer_id)
+            
             logger.info(f"Successfully created customer {new_customer.id} for Stripe {stripe_customer_id}")
             return True
             
@@ -299,12 +304,19 @@ class StripeIntegration(BaseIntegrationService):
     def _handle_customer_deleted(self, stripe_customer: dict, db: Session) -> bool:
         try:
             stripe_customer_id = stripe_customer.get("id")
-            logger.info(f"Deleting local customer linked to Stripe ID {stripe_customer_id}.")
+            logger.info(f"Deactivating local customer linked to Stripe ID {stripe_customer_id}.")
             
-            deleted = customer_repo.delete_by_stripe_id(db, stripe_id=stripe_customer_id)
+            # Find the customer by Stripe ID first
+            existing_customer = customer_repo.get_by_stripe_id(db, stripe_id=stripe_customer_id)
             
-            if deleted:
-                logger.info(f"Successfully deleted local customer linked to Stripe ID {stripe_customer_id}")
+            if existing_customer:
+                # Use webhook method to deactivate (prevents circular updates)
+                deactivated = customer_service.deactivate_customer_from_webhook(db, existing_customer.id)
+                if deactivated:
+                    logger.info(f"Successfully deactivated customer {existing_customer.id} linked to Stripe ID {stripe_customer_id}")
+                else:
+                    logger.error(f"Failed to deactivate customer {existing_customer.id}")
+                    return False
             else:
                 logger.warning(f"No local customer found for Stripe ID {stripe_customer_id}")
             
