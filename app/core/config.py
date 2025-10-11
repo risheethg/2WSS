@@ -6,6 +6,7 @@ class Settings(BaseSettings):
 
     KAFKA_BOOTSTRAP_SERVERS: str
     KAFKA_CUSTOMER_TOPIC: str
+    KAFKA_DLQ_TOPIC: str = "customer_events_dlq"  # Dead Letter Queue
 
     STRIPE_API_KEY: str
     STRIPE_WEBHOOK_SECRET: str
@@ -16,6 +17,11 @@ class Settings(BaseSettings):
     ENABLED_INTEGRATIONS: str = "stripe"  # Comma-separated list of enabled integrations
     STRIPE_INTEGRATION_ENABLED: bool = True
     SALESFORCE_INTEGRATION_ENABLED: bool = False
+    
+    # Retry configuration
+    MAX_RETRY_ATTEMPTS: int = 5
+    INITIAL_RETRY_DELAY: int = 2  # seconds
+    MAX_RETRY_DELAY: int = 300    # seconds (5 minutes)
     
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding='utf-8', extra='ignore')
     

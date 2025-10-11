@@ -50,6 +50,8 @@ services:
     container_name: zenskar_app
     env_file:
       - .env
+    environment:
+      - DOCKER_ENV=true
     ports:
       - "8000:8000"
     volumes:
