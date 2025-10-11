@@ -10,6 +10,8 @@ app = FastAPI(
 app.include_router(customer_routes.router)
 app.include_router(webhook_routes.router)
 
+
+
 @app.get("/")
 def read_root():
     return {"message": "Welcome to the Zenskar Assignment API"}
