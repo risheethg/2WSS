@@ -132,12 +132,18 @@ class CustomerService:
         Used during reconciliation or webhook processing.
         """
         try:
-            customer = customer_repo.get_by_id(db, customer_id)
-            if customer:
-                customer.stripe_customer_id = stripe_customer_id
+            # Get the actual database model, not the response model
+            db_customer = db.query(customer_model.Customer).filter(
+                customer_model.Customer.id == customer_id
+            ).first()
+            
+            if db_customer:
+                db_customer.stripe_customer_id = stripe_customer_id
                 db.commit()
-                db.refresh(customer)
-            return customer
+                db.refresh(db_customer)
+                # Return as response model
+                return CustomerInDB.from_orm(db_customer)
+            return None
             
         except Exception as e:
             db.rollback()
@@ -149,12 +155,18 @@ class CustomerService:
         Use this method when processing deletion webhooks from Stripe.
         """
         try:
-            customer = customer_repo.get_by_id(db, customer_id)
-            if customer:
-                customer.is_active = False
+            # Get the actual database model, not the response model
+            db_customer = db.query(customer_model.Customer).filter(
+                customer_model.Customer.id == customer_id
+            ).first()
+            
+            if db_customer:
+                db_customer.is_active = False
                 db.commit()
-                db.refresh(customer)
-            return customer
+                db.refresh(db_customer)
+                # Return as response model
+                return CustomerInDB.from_orm(db_customer)
+            return None
             
         except Exception as e:
             db.rollback()
