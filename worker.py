@@ -1,72 +1,82 @@
 import json
 import time
 from kafka import KafkaConsumer
-import stripe
 from sqlalchemy.orm import Session
+from typing import List
 
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.core.logger import worker_logger as logger
-from app.models.customer import Customer
+from app.integrations.registry import integration_registry
+from app.integrations.base import OutwardIntegrationService
 
-# Configure Stripe client
-stripe.api_key = settings.STRIPE_API_KEY
+logger.info("Integration Worker starting...")
 
-logger.info("Worker starting...")
+def get_enabled_integrations() -> List[OutwardIntegrationService]:
+    """Get enabled outward integration services."""
+    enabled_integrations = integration_registry.get_enabled_outward_integrations()
+    
+    logger.info(f"Found {len(enabled_integrations)} enabled outward integrations")
+    for integration in enabled_integrations:
+        logger.info(f"Integration '{integration.name}' is enabled and will process events")
+    
+    return enabled_integrations
 
 def get_db_session():
-    """Helper to get a new DB session for the worker."""
+    """Get new DB session for worker."""
     return SessionLocal()
 
-def process_message(message, db: Session):
-    """Processes a single message from Kafka."""
+def process_message(message, db: Session, enabled_integrations: List[OutwardIntegrationService]):
+    """Process Kafka message and dispatch to enabled integrations."""
     try:
         event = json.loads(message.value)
         event_type = event.get("event_type")
         customer_data = event.get("customer")
         local_customer_id = customer_data.get("id")
-        stripe_customer_id = customer_data.get("stripe_customer_id")
 
         logger.info(f"Processing event: {event_type} for local customer ID: {local_customer_id}")
+        logger.info(f"Dispatching to {len(enabled_integrations)} enabled integration(s)")
 
-        if event_type == "customer_created":
+        # Send event to all enabled integrations
+        for integration in enabled_integrations:
             try:
-                stripe_customer = stripe.Customer.create(
-                    name=customer_data.get("name"),
-                    email=customer_data.get("email"),
-                    metadata={'local_db_id': local_customer_id}
-                )
-                # CRITICAL: Update our local DB with the new Stripe ID
-                local_customer = db.query(Customer).filter(Customer.id == local_customer_id).first()
-                if local_customer:
-                    local_customer.stripe_customer_id = stripe_customer.id
-                    db.commit()
-                    logger.info(f"Created Stripe customer {stripe_customer.id} and linked to local ID {local_customer_id}")
-            except stripe.error.StripeError as e:
-                logger.error(f"Stripe API error on create: {e}")
-
-        elif event_type == "customer_updated":
-            if not stripe_customer_id: return
-            try:
-                stripe.Customer.modify(stripe_customer_id, name=customer_data.get("name"), email=customer_data.get("email"))
-                logger.info(f"Updated Stripe customer {stripe_customer_id}")
-            except stripe.error.StripeError as e:
-                logger.error(f"Stripe API error on update: {e}")
-
-        elif event_type == "customer_deleted":
-            if not stripe_customer_id: return
-            try:
-                stripe.Customer.delete(stripe_customer_id)
-                logger.info(f"Deleted Stripe customer {stripe_customer_id}")
-            except stripe.error.StripeError as e:
-                logger.error(f"Stripe API error on delete: {e}")
+                if event_type == "customer_created":
+                    result = integration.create_customer(customer_data, db)
+                    if result:
+                        logger.info(f"Successfully processed {event_type} in {integration.name} integration")
+                    else:
+                        logger.warning(f"Failed to process {event_type} in {integration.name} integration")
+                        
+                elif event_type == "customer_updated":
+                    result = integration.update_customer(customer_data, db)
+                    if result:
+                        logger.info(f"Successfully processed {event_type} in {integration.name} integration")
+                    else:
+                        logger.warning(f"Failed to process {event_type} in {integration.name} integration")
+                        
+                elif event_type == "customer_deleted":
+                    result = integration.delete_customer(customer_data, db)
+                    if result:
+                        logger.info(f"Successfully processed {event_type} in {integration.name} integration")
+                    else:
+                        logger.warning(f"Failed to process {event_type} in {integration.name} integration")
+                        
+                else:
+                    logger.warning(f"Unhandled event type: {event_type}")
+                    
+            except Exception as integration_error:
+                logger.error(f"Error in {integration.name} integration for {event_type}: {integration_error}")
+                # Continue with other integrations if one fails
+                continue
+                
     except Exception as e:
-        logger.error(f"An unexpected error occurred in worker: {e}")
+        logger.error(f"An unexpected error occurred processing message: {e}")
 
 def main():
-    """The main function for the worker, runs in an infinite loop."""
+    """Main worker loop - processes Kafka events and dispatches to integrations."""
     db: Session = None
     consumer: KafkaConsumer = None
+    enabled_integrations: List[OutwardIntegrationService] = []
 
     while True:
         try:
@@ -77,6 +87,12 @@ def main():
                 db = get_db_session()
                 logger.info("Database session established/re-established.")
 
+            # Get enabled integrations
+            enabled_integrations = get_enabled_integrations()
+            
+            if not enabled_integrations:
+                logger.warning("No integrations are enabled. Worker will continue but no events will be processed.")
+
             # Setup Kafka consumer
             if not consumer:
                 logger.info("Connecting to Kafka...")
@@ -84,14 +100,17 @@ def main():
                     settings.KAFKA_CUSTOMER_TOPIC,
                     bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
                     auto_offset_reset='earliest',
-                    group_id='stripe-sync-worker-group',
+                    group_id='integration-dispatcher-group',
                     request_timeout_ms=15000
                 )
                 logger.info("Successfully connected to Kafka. Listening for messages...")
 
             # This will block until a message is received
             for message in consumer:
-                process_message(message, db)
+                if enabled_integrations:
+                    process_message(message, db, enabled_integrations)
+                else:
+                    logger.debug("Skipping message processing - no enabled integrations")
 
         except Exception as e:
             logger.error(f"An error occurred in the main worker loop: {e}")
