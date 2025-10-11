@@ -1,8 +1,8 @@
-# Zenskar Two-Way Integration Service 🔄
+# Zenskar Two-Way Integration Service
 
 A production-ready, scalable two-way integration service that synchronizes customer data between your application and external services (Stripe, Salesforce, etc.) with comprehensive error handling, conflict resolution, and monitoring capabilities.
 
-## 📋 Table of Contents
+## Table of Contents
 
 - [Overview](#overview)
 - [Tech Stack](#tech-stack)
@@ -19,7 +19,7 @@ A production-ready, scalable two-way integration service that synchronizes custo
 - [Extensibility](#extensibility)
 - [Troubleshooting](#troubleshooting)
 
-## 🎯 Overview
+## Overview
 
 This service implements a **bi-directional, real-time synchronization system** between your customer catalog and external service providers. Built with enterprise-grade reliability patterns, it ensures data consistency across distributed systems while handling common edge cases like network failures, duplicate events, and data conflicts.
 
@@ -32,7 +32,7 @@ This service implements a **bi-directional, real-time synchronization system** b
 - **Extensible plugin architecture** for adding new integrations
 - **Production monitoring** with admin interfaces and reconciliation tools
 
-## 🛠 Tech Stack
+## Tech Stack
 
 ### Core Technologies
 - **Backend Framework**: FastAPI (Python 3.11+)
@@ -53,7 +53,7 @@ This service implements a **bi-directional, real-time synchronization system** b
 - **Circuit Breaker**: API failure resilience
 - **Registry Pattern**: Pluggable integrations
 
-## 🏗 System Architecture
+## System Architecture
 
 ```
 ┌─────────────────────────────────────┐    ┌─────────────────┐
@@ -148,30 +148,30 @@ This service implements a **bi-directional, real-time synchronization system** b
 - **Conflict Resolution**: Manages data conflicts with admin intervention
 - **Dead Letter Queue**: Handles permanently failed events
 
-## ✨ Features
+## Features
 
 ### Core Functionality
-- ✅ **Customer CRUD Operations** with RESTful API
-- ✅ **Real-time Stripe Integration** (create, update, delete)
-- ✅ **Webhook Processing** for inbound Stripe events
-- ✅ **Event-driven Architecture** with Kafka messaging
-- ✅ **Database Migrations** with Alembic
+- **Customer CRUD Operations** with RESTful API
+- **Real-time Stripe Integration** (create, update, delete)
+- **Webhook Processing** for inbound Stripe events
+- **Event-driven Architecture** with Kafka messaging
+- **Database Migrations** with Alembic
 
 ### Advanced Features
-- ✅ **Transactional Outbox Pattern** - Prevents event loss
-- ✅ **Retry with Exponential Backoff** - Handles transient failures
-- ✅ **Dead Letter Queue** - Manages permanently failed events
-- ✅ **Idempotent Processing** - Safe to replay events
-- ✅ **Conflict Resolution** - Handles data inconsistencies
-- ✅ **Data Reconciliation** - Periodic drift detection
-- ✅ **Circular Update Prevention** - Avoids infinite loops
-- ✅ **Admin Interfaces** - Monitoring and manual intervention
-- ✅ **Comprehensive Logging** - Structured logging throughout
-- ✅ **Health Checks** - Container and service health monitoring
-- ✅ **Configuration Management** - Environment-based settings
-- ✅ **Error Tracking** - Detailed error reporting and metrics
+- **Transactional Outbox Pattern** - Prevents event loss
+- **Retry with Exponential Backoff** - Handles transient failures
+- **Dead Letter Queue** - Manages permanently failed events
+- **Idempotent Processing** - Safe to replay events
+- **Conflict Resolution** - Handles data inconsistencies
+- **Data Reconciliation** - Periodic drift detection
+- **Circular Update Prevention** - Avoids infinite loops
+- **Admin Interfaces** - Monitoring and manual intervention
+- **Comprehensive Logging** - Structured logging throughout
+- **Health Checks** - Container and service health monitoring
+- **Configuration Management** - Environment-based settings
+- **Error Tracking** - Detailed error reporting and metrics
 
-## 📋 Prerequisites
+## Prerequisites
 
 ### Required Software
 - **Docker & Docker Compose** (v3.8+)
@@ -187,7 +187,7 @@ This service implements a **bi-directional, real-time synchronization system** b
 - **Storage**: 2GB+ free disk space
 - **Network**: Internet access for API calls and webhooks
 
-## 🚀 Quick Setup
+## Quick Setup
 
 ### 1. Clone Repository
 ```bash
@@ -256,7 +256,7 @@ ngrok http 8000
 # Events: customer.created, customer.updated, customer.deleted
 ```
 
-## ⚙️ Environment Configuration
+## Environment Configuration
 
 ### Required Environment Variables
 
@@ -312,7 +312,7 @@ ENABLE_METRICS=true
 METRICS_PORT=9090
 ```
 
-## 📚 API Documentation
+## API Documentation
 
 ### Customer Endpoints
 
@@ -427,19 +427,19 @@ POST /admin/reconciliation/mismatches/{mismatch_id}/resolve
 }
 ```
 
-## 🛡 Edge Cases & Resilience
+## Edge Cases & Resilience
 
 ### Outward Sync Failures (Our App → Stripe)
 
 #### 1. Transactional Outbox Pattern
 **Problem**: Events lost between database commit and Kafka publish
 ```python
-# ❌ Problematic approach
+# Problematic approach
 def create_customer(customer_data):
     customer = save_to_db(customer_data)      # Could succeed
     publish_to_kafka(customer)                # Could fail - event lost!
     
-# ✅ Our solution  
+# Our solution  
 def create_customer(customer_data):
     with database_transaction():
         customer = save_to_db(customer_data)
@@ -554,7 +554,7 @@ def call_stripe_api():
     pass
 ```
 
-## 📁 Code Structure
+## Code Structure
 
 ```
 ├── app/
@@ -656,7 +656,7 @@ class IntegrationRegistry:
         pass
 ```
 
-## 🖥 Monitoring & Admin
+## Monitoring & Admin
 
 ### Health Checks
 - **Database**: Connection and query performance
@@ -708,7 +708,7 @@ logger.info("Customer created", extra={
 })
 ```
 
-## 🐳 Docker Operations
+## Docker Operations
 
 ### Essential Docker Commands
 
@@ -804,7 +804,7 @@ docker-compose exec app python -c "import sys; print(sys.version)"
 docker-compose exec db pg_isready -U zenskar_user -d zenskar_db
 ```
 
-## 🚀 Deployment
+## Deployment
 
 ### Production Deployment
 
@@ -884,7 +884,7 @@ DATABASE_URL=postgresql://prod-db:5432/zenskar_prod
 - **Input Validation**: Strict validation on all inputs
 - **HTTPS**: TLS for all external communications
 
-## 🔧 Extensibility
+## Extensibility
 
 ### Adding New Integrations
 
@@ -977,7 +977,7 @@ class StripeIntegration(BaseIntegrationService):
 - **Configuration-Driven**: Control via environment variables
 - **Scalable**: Add unlimited integrations without architectural changes
 
-## 🔍 Troubleshooting
+## Troubleshooting
 
 ### Common Issues
 
@@ -1067,7 +1067,7 @@ DEBUG_MODE=true
 docker-compose restart app
 ```
 
-## 📊 Metrics & Monitoring
+## Metrics & Monitoring
 
 ### Key Metrics to Monitor
 
@@ -1086,13 +1086,13 @@ docker-compose restart app
 
 ---
 
-## 🎉 Conclusion
+## Conclusion
 
 This integration service provides a robust, scalable foundation for bi-directional data synchronization. Built with production-grade patterns and comprehensive error handling, it's ready for real-world deployment while remaining extensible for future integrations and entity types.
 
 **Key Benefits:**
-- ✅ **Production Ready**: Comprehensive error handling and monitoring
-- ✅ **Highly Scalable**: Event-driven architecture with horizontal scaling
-- ✅ **Extensible Design**: Plugin architecture for unlimited integrations
-- ✅ **Data Consistency**: Advanced conflict resolution and reconciliation
-- ✅ **Developer Friendly**: Comprehensive documentation and testing
+- **Production Ready**: Comprehensive error handling and monitoring
+- **Highly Scalable**: Event-driven architecture with horizontal scaling
+- **Extensible Design**: Plugin architecture for unlimited integrations
+- **Data Consistency**: Advanced conflict resolution and reconciliation
+- **Developer Friendly**: Comprehensive documentation and testing
