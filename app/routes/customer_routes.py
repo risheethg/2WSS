@@ -75,10 +75,10 @@ def delete_customer(
     customer_id: int,
     db: Session = Depends(get_db)
 ):
-    db_customer = customer_service.delete_customer(db, customer_id=customer_id)
-    if db_customer is None:
+    deleted = customer_service.delete_customer(db, customer_id=customer_id)
+    if not deleted:
         return response_handler.failure(message="Customer not found", status_code=404)
     return response_handler.success(
-        data=customer_model.CustomerInDB.from_orm(db_customer).model_dump(),
+        data={"customer_id": customer_id, "deleted": True},
         message="Customer deleted successfully"
     )

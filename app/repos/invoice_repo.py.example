@@ -1,0 +1,147 @@
+"""
+Invoice Repository Implementation
+
+Example of how easy it is to add new entity repositories
+using the base repository pattern in your existing repos/ folder.
+"""
+
+from typing import Dict, List, Optional, Any
+from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy import or_
+import uuid
+
+from app.repos.base import BaseRepository
+from app.models.invoice import Invoice, InvoiceCreate, InvoiceUpdate, InvoiceInDB
+
+
+class InvoiceRepo(BaseRepository[Invoice, InvoiceCreate, InvoiceUpdate, InvoiceInDB]):
+    """Repository for invoice table operations"""
+    
+    def get_by_id(self, db: Session, entity_id: int) -> Optional[InvoiceInDB]:
+        """Get invoice by ID"""
+        invoice = db.query(Invoice).filter(
+            Invoice.id == entity_id,
+            Invoice.is_active == True
+        ).first()
+        
+        return InvoiceInDB.from_orm(invoice) if invoice else None
+    
+    def get_by_field(self, db: Session, field_name: str, field_value: Any) -> Optional[InvoiceInDB]:
+        """Get invoice by any field"""
+        if not hasattr(Invoice, field_name):
+            return None
+        
+        invoice = db.query(Invoice).filter(
+            getattr(Invoice, field_name) == field_value,
+            Invoice.is_active == True
+        ).first()
+        
+        return InvoiceInDB.from_orm(invoice) if invoice else None
+    
+    def get_all(self, db: Session, skip: int = 0, limit: int = 100, filters: Dict[str, Any] = None) -> List[InvoiceInDB]:
+        """Get all invoices with optional filtering"""
+        query = db.query(Invoice).filter(Invoice.is_active == True)
+        
+        # Apply filters if provided
+        if filters:
+            for field, value in filters.items():
+                if hasattr(Invoice, field):
+                    query = query.filter(getattr(Invoice, field) == value)
+        
+        invoices = query.offset(skip).limit(limit).all()
+        return [InvoiceInDB.from_orm(invoice) for invoice in invoices]
+    
+    def create(self, db: Session, entity_data: InvoiceCreate) -> InvoiceInDB:
+        """Create new invoice"""
+        try:
+            # Generate unique invoice number
+            invoice_number = f"INV-{uuid.uuid4().hex[:8].upper()}"
+            
+            db_invoice = Invoice(
+                customer_id=entity_data.customer_id,
+                amount=entity_data.amount,
+                currency=entity_data.currency,
+                status=entity_data.status,
+                due_date=entity_data.due_date,
+                invoice_number=invoice_number
+            )
+            db.add(db_invoice)
+            db.commit()
+            db.refresh(db_invoice)
+            return InvoiceInDB.from_orm(db_invoice)
+            
+        except IntegrityError as e:
+            db.rollback()
+            raise ValueError(f"Failed to create invoice: {str(e)}")
+    
+    def update(self, db: Session, entity_id: int, update_data: InvoiceUpdate) -> Optional[InvoiceInDB]:
+        """Update existing invoice"""
+        invoice = db.query(Invoice).filter(
+            Invoice.id == entity_id,
+            Invoice.is_active == True
+        ).first()
+        
+        if not invoice:
+            return None
+        
+        # Update fields if provided
+        if update_data.amount is not None:
+            invoice.amount = update_data.amount
+        if update_data.currency is not None:
+            invoice.currency = update_data.currency
+        if update_data.status is not None:
+            invoice.status = update_data.status
+        if update_data.due_date is not None:
+            invoice.due_date = update_data.due_date
+        
+        try:
+            db.commit()
+            db.refresh(invoice)
+            return InvoiceInDB.from_orm(invoice)
+        except IntegrityError as e:
+            db.rollback()
+            raise ValueError(f"Failed to update invoice: {str(e)}")
+    
+    def delete(self, db: Session, entity_id: int) -> bool:
+        """Soft delete invoice"""
+        invoice = db.query(Invoice).filter(
+            Invoice.id == entity_id,
+            Invoice.is_active == True
+        ).first()
+        
+        if not invoice:
+            return False
+        
+        invoice.is_active = False
+        db.commit()
+        return True
+    
+    def search(self, db: Session, query: str) -> List[InvoiceInDB]:
+        """Search invoices by invoice number or status"""
+        invoices = db.query(Invoice).filter(
+            Invoice.is_active == True,
+            or_(
+                Invoice.invoice_number.ilike(f"%{query}%"),
+                Invoice.status.ilike(f"%{query}%")
+            )
+        ).all()
+        
+        return [InvoiceInDB.from_orm(invoice) for invoice in invoices]
+    
+    # Invoice-specific convenience methods
+    def get_by_customer(self, db: Session, customer_id: int) -> List[InvoiceInDB]:
+        """Get all invoices for a customer"""
+        return self.get_all(db, filters={"customer_id": customer_id})
+    
+    def get_by_status(self, db: Session, status: str) -> List[InvoiceInDB]:
+        """Get all invoices with specific status"""
+        return self.get_all(db, filters={"status": status})
+    
+    def get_by_stripe_id(self, db: Session, stripe_id: str) -> Optional[InvoiceInDB]:
+        """Get invoice by Stripe ID"""
+        return self.get_by_field(db, "stripe_invoice_id", stripe_id)
+
+
+# Create instance for use in services
+invoice_repo = InvoiceRepo()
