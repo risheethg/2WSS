@@ -158,12 +158,19 @@ class CustomerRepo(BaseRepository[customer_model.Customer, customer_model.Custom
             db.refresh(db_customer)
         return db_customer
 
-    def delete_by_stripe_id(self, db: Session, stripe_id: str) -> Optional[customer_model.Customer]:
-        db_customer = self.get_by_stripe_id(db, stripe_id)
+    def delete_by_stripe_id(self, db: Session, stripe_id: str) -> bool:
+        """Delete customer by Stripe ID (soft delete)"""
+        # Get the actual database model, not the Pydantic model
+        db_customer = db.query(customer_model.Customer).filter(
+            customer_model.Customer.stripe_customer_id == stripe_id,
+            customer_model.Customer.is_active == True
+        ).first()
+        
         if db_customer:
-            # If you have a soft delete (is_active=False), you would implement that here.
-            db.delete(db_customer)
+            # Soft delete
+            db_customer.is_active = False
             db.commit()
-        return db_customer
+            return True
+        return False
 
 customer_repo = CustomerRepo()

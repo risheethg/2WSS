@@ -47,6 +47,11 @@ class BaseIntegrationService(OutwardIntegrationService, InwardIntegrationService
         self.name = name
         self.enabled = enabled
         print(f"{self.name.title()} Integration {'Enabled' if enabled else 'Disabled'}.")
+    
+    @property
+    def is_enabled(self) -> bool:
+        """Check if integration is enabled."""
+        return self.enabled
 
     @property
     def is_enabled(self) -> bool:
