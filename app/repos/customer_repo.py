@@ -54,7 +54,25 @@ class CustomerRepo(BaseRepository[customer_model.Customer, customer_model.Custom
         return [CustomerInDB.from_orm(customer) for customer in customers]
 
     def create(self, db: Session, entity_data: customer_model.CustomerCreate) -> CustomerInDB:
-        """Create customer (BaseRepository interface)"""
+        """Create customer (BaseRepository interface) - Reactivates deleted users"""
+        # First check if a deleted user with this email exists
+        existing_customer = db.query(customer_model.Customer).filter(
+            customer_model.Customer.email == entity_data.email
+        ).first()
+        
+        if existing_customer:
+            if not existing_customer.is_active:
+                # Reactivate the deleted user
+                existing_customer.is_active = True
+                existing_customer.name = entity_data.name  # Update name in case it changed
+                db.commit()
+                db.refresh(existing_customer)
+                return CustomerInDB.from_orm(existing_customer)
+            else:
+                # Active user with this email already exists
+                raise ValueError(f"Customer with email '{entity_data.email}' already exists")
+        
+        # No existing customer, create new one
         try:
             db_customer = customer_model.Customer(name=entity_data.name, email=entity_data.email)
             db.add(db_customer)
@@ -63,8 +81,6 @@ class CustomerRepo(BaseRepository[customer_model.Customer, customer_model.Custom
             return CustomerInDB.from_orm(db_customer)
         except IntegrityError as e:
             db.rollback()
-            if "email" in str(e.orig):
-                raise ValueError(f"Customer with email '{entity_data.email}' already exists")
             raise ValueError(f"Failed to create customer: {str(e)}")
 
     def update(self, db: Session, entity_id: int, update_data: customer_model.CustomerUpdate) -> Optional[CustomerInDB]:
@@ -122,7 +138,26 @@ class CustomerRepo(BaseRepository[customer_model.Customer, customer_model.Custom
     
     def create_with_integration_id(self, db: Session, entity_data: customer_model.CustomerCreate, 
                                   integration_field: str, integration_id: str) -> CustomerInDB:
-        """Create customer with integration-specific ID"""
+        """Create customer with integration-specific ID - Reactivates deleted users"""
+        # First check if a deleted user with this email exists
+        existing_customer = db.query(customer_model.Customer).filter(
+            customer_model.Customer.email == entity_data.email
+        ).first()
+        
+        if existing_customer:
+            if not existing_customer.is_active:
+                # Reactivate the deleted user and add integration ID
+                existing_customer.is_active = True
+                existing_customer.name = entity_data.name
+                setattr(existing_customer, integration_field, integration_id)
+                db.commit()
+                db.refresh(existing_customer)
+                return CustomerInDB.from_orm(existing_customer)
+            else:
+                # Active user with this email already exists
+                raise ValueError(f"Customer with email '{entity_data.email}' already exists")
+        
+        # No existing customer, create new one with integration ID
         try:
             customer_dict = {
                 "name": entity_data.name,
@@ -137,8 +172,6 @@ class CustomerRepo(BaseRepository[customer_model.Customer, customer_model.Custom
             return CustomerInDB.from_orm(db_customer)
         except IntegrityError as e:
             db.rollback()
-            if "email" in str(e.orig):
-                raise ValueError(f"Customer with email '{entity_data.email}' already exists")
             raise ValueError(f"Failed to create customer: {str(e)}")
 
     def create_with_stripe_id(self, db: Session, customer: customer_model.CustomerCreate, stripe_id: str) -> customer_model.Customer:

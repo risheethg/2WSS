@@ -14,23 +14,21 @@ def get_customer_repo():
 
 router = APIRouter(prefix="/customers", tags=["customers"])
 
-@router.post("/", status_code=status.HTTP_201_CREATED)
+@router.post("/")
 def create_customer(
     customer: customer_model.CustomerCreate,
-    db: Session = Depends(get_db),
-    customer_repo = Depends(get_customer_repo)
+    db: Session = Depends(get_db)
 ):
-
-    existing_customer = customer_repo.get_by_email(db, email=customer.email)
-    if existing_customer:
-        return response_handler.failure(message="A customer with this email already exists.", status_code=409)
-
-    new_customer = customer_service.create_customer(db=db, customer=customer)
-    return response_handler.success(
-        data=customer_model.CustomerInDB.from_orm(new_customer).model_dump(),
-        message="Customer created successfully",
-        status_code=status.HTTP_201_CREATED
-    )
+    try:
+        new_customer = customer_service.create_customer(db=db, customer=customer)
+        return response_handler.success(
+            data=new_customer.model_dump(),  # CustomerInDB from service
+            message="Customer created successfully",
+            status_code=status.HTTP_201_CREATED
+        )
+    except ValueError as e:
+        # Handle repository errors (e.g., active customer already exists)
+        return response_handler.failure(message=str(e), status_code=409)
 
 
 @router.get("/")
