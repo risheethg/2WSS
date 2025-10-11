@@ -8,3 +8,4 @@ alembic
 kafka-python
 stripe
 redis[hiredis]
+aiohttp

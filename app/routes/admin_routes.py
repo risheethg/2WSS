@@ -1,14 +1,27 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 from datetime import datetime
 
-from app.core.database import get_db
+from app.core.database import get_db_session
 from app.services.customer_service import customer_service
 from app.core.response import response_handler
 from app.core.logger import logger
 
 router = APIRouter(prefix="/admin", tags=["Admin & Monitoring"])
+
+# =============================================================================
+# BASIC HEALTH ENDPOINTS
+# =============================================================================
+
+@router.get("/health")
+def get_health():
+    """Basic health check endpoint"""
+    return {
+        "status": "healthy",
+        "service": "Zenskar Integration Service", 
+        "timestamp": datetime.utcnow().isoformat()
+    }
 
 # =============================================================================
 # MONITORING ENDPOINTS
@@ -182,6 +195,119 @@ def get_connection_pool_status():
     except Exception as e:
         logger.error(f"Error retrieving connection pool status: {e}")
         return response_handler.failure(message="Failed to retrieve connection pool status", status_code=500)
+
+
+# =============================================================================
+# OUTBOX PATTERN MONITORING ENDPOINTS
+# =============================================================================
+
+@router.get("/outbox/statistics")
+def get_outbox_statistics(
+    hours: int = 24,
+    db: Session = Depends(get_db)
+):
+    """Get outbox event statistics for monitoring"""
+    from app.services.outbox_service import outbox_service
+    try:
+        stats = outbox_service.get_outbox_statistics(db, hours=hours)
+        return response_handler.success(
+            data=stats,
+            message=f"Outbox statistics for last {hours} hours retrieved successfully"
+        )
+    except Exception as e:
+        logger.error(f"Error retrieving outbox statistics: {e}")
+        return response_handler.failure(message="Failed to retrieve outbox statistics", status_code=500)
+
+
+@router.get("/outbox/pending")
+def get_pending_outbox_events(
+    limit: int = 50,
+    topic: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """Get pending outbox events"""
+    from app.services.outbox_service import outbox_service
+    try:
+        events = outbox_service.get_pending_events(db, limit=limit, topic=topic)
+        event_data = [event.to_dict() for event in events]
+        
+        return response_handler.success(
+            data={
+                "events": event_data,
+                "count": len(event_data),
+                "limit": limit,
+                "topic_filter": topic
+            },
+            message="Pending outbox events retrieved successfully"
+        )
+    except Exception as e:
+        logger.error(f"Error retrieving pending outbox events: {e}")
+        return response_handler.failure(message="Failed to retrieve pending events", status_code=500)
+
+
+@router.get("/outbox/dead-letter")
+def get_dead_letter_events(
+    limit: int = 50,
+    hours: int = 24,
+    db: Session = Depends(get_db)
+):
+    """Get dead letter queue events"""
+    from app.services.outbox_service import outbox_service
+    try:
+        events = outbox_service.get_dead_letter_events(db, limit=limit, hours=hours)
+        event_data = [event.to_dict() for event in events]
+        
+        return response_handler.success(
+            data={
+                "events": event_data,
+                "count": len(event_data),
+                "hours": hours
+            },
+            message="Dead letter events retrieved successfully"
+        )
+    except Exception as e:
+        logger.error(f"Error retrieving dead letter events: {e}")
+        return response_handler.failure(message="Failed to retrieve dead letter events", status_code=500)
+
+
+@router.post("/outbox/retry/{event_id}")
+def retry_dead_letter_event(
+    event_id: str,
+    db: Session = Depends(get_db)
+):
+    """Manually retry a dead letter event"""
+    from app.services.outbox_service import outbox_service
+    try:
+        success = outbox_service.retry_dead_letter_event(db, event_id)
+        
+        if success:
+            return response_handler.success(
+                data={"event_id": event_id, "retried": True},
+                message="Event reset for retry successfully"
+            )
+        else:
+            return response_handler.failure(
+                message="Event not found or not in dead letter queue", 
+                status_code=404
+            )
+    except Exception as e:
+        logger.error(f"Error retrying dead letter event: {e}")
+        return response_handler.failure(message="Failed to retry event", status_code=500)
+
+
+@router.post("/outbox/process")
+async def trigger_outbox_processing():
+    """Manually trigger outbox event processing"""
+    from app.core.outbox_processor import outbox_processor
+    try:
+        stats = await outbox_processor.process_pending_events()
+        return response_handler.success(
+            data=stats,
+            message="Outbox processing triggered successfully"
+        )
+    except Exception as e:
+        logger.error(f"Error triggering outbox processing: {e}")
+        return response_handler.failure(message="Failed to trigger processing", status_code=500)
 
 
 # =============================================================================

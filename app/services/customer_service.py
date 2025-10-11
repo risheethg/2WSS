@@ -29,6 +29,7 @@ from app.core.transaction_manager import (
 from app.core.constraint_handler import constraint_handler, ConstraintType
 from app.core.deadlock_detector import deadlock_detector
 from app.core.db_monitoring import db_monitor
+from app.services.outbox_service import outbox_service
 
 class CustomerService:
     def __init__(self):
@@ -41,11 +42,28 @@ class CustomerService:
             await lock_service.initialize()
     
     def create_customer(self, db: Session, customer: customer_model.CustomerCreate) -> CustomerInDB:
-        """Create customer using new repository interface (legacy method)"""
-        customer_in_db = customer_repo.create(db, customer)
-        customer_data = customer_in_db.model_dump()
-        messaging.send_customer_event("customer_created", customer_data)
-        return customer_in_db
+        """Create customer using transactional outbox pattern (legacy method enhanced)"""
+        # Use transaction to ensure atomicity between customer creation and event publishing
+        with transaction_manager.transaction(db):
+            customer_in_db = customer_repo.create(db, customer)
+            
+            # Create outbox event within the same transaction
+            # This guarantees the event is only created if customer creation succeeds
+            outbox_service.create_event(
+                db=db,
+                event_type="customer_created",
+                aggregate_id=str(customer_in_db.id),
+                aggregate_type="customer", 
+                payload=customer_in_db.model_dump(),
+                partition_key=str(customer_in_db.id),  # Use customer ID for message ordering
+                metadata={
+                    "source": "customer_service",
+                    "method": "create_customer_legacy",
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            )
+            
+            return customer_in_db
     
     async def create_customer_with_integrity(
         self,
@@ -106,9 +124,22 @@ class CustomerService:
                     session, created_customer.id, "stripe", sync_status="pending"
                 )
                 
-                # Send to message queue (outside transaction for performance)
-                customer_data = created_customer.model_dump()
-                messaging.send_customer_event("customer_created", customer_data)
+                # Use transactional outbox pattern for reliable event publishing
+                # This guarantees the event is only published if the transaction succeeds
+                outbox_service.create_event(
+                    db=session,
+                    event_type="customer_created",
+                    aggregate_id=str(created_customer.id),
+                    aggregate_type="customer",
+                    payload=created_customer.model_dump(),
+                    partition_key=str(created_customer.id),  # Ensures message ordering
+                    metadata={
+                        "source": "customer_service",
+                        "method": "create_customer_with_integrity",
+                        "idempotency_key": idempotency_key,
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+                )
                 
                 # Mark idempotency key as completed
                 idempotency_service.update_idempotency_key(
@@ -182,12 +213,27 @@ class CustomerService:
                 raise
 
     def update_customer(self, db: Session, customer_id: int, customer_update: customer_model.CustomerUpdate) -> Optional[CustomerInDB]:
-        """Update customer using new repository interface (legacy method)"""
-        updated_customer = customer_repo.update(db, customer_id, customer_update)
-        if updated_customer:
-            customer_data = updated_customer.model_dump()
-            messaging.send_customer_event("customer_updated", customer_data)
-        return updated_customer
+        """Update customer using transactional outbox pattern (legacy method enhanced)"""
+        with transaction_manager.transaction(db):
+            updated_customer = customer_repo.update(db, customer_id, customer_update)
+            
+            if updated_customer:
+                # Create outbox event for update within the same transaction
+                outbox_service.create_event(
+                    db=db,
+                    event_type="customer_updated",
+                    aggregate_id=str(customer_id),
+                    aggregate_type="customer",
+                    payload=updated_customer.model_dump(),
+                    partition_key=str(customer_id),  # Ensures message ordering
+                    metadata={
+                        "source": "customer_service", 
+                        "method": "update_customer_legacy",
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+                )
+                
+            return updated_customer
     
     async def update_customer_with_integrity(
         self,
@@ -271,14 +317,29 @@ class CustomerService:
                 raise
 
     def delete_customer(self, db: Session, customer_id: int) -> bool:
-        """Delete customer using new repository interface (legacy method)"""
-        # Get customer data before deletion for event
-        customer = customer_repo.get_by_id(db, customer_id)
-        deleted = customer_repo.delete(db, customer_id)
-        if deleted and customer:
-            customer_data = customer.model_dump()
-            messaging.send_customer_event("customer_deleted", customer_data)
-        return deleted
+        """Delete customer using transactional outbox pattern (legacy method enhanced)"""
+        with transaction_manager.transaction(db):
+            # Get customer data before deletion for event
+            customer = customer_repo.get_by_id(db, customer_id)
+            deleted = customer_repo.delete(db, customer_id)
+            
+            if deleted and customer:
+                # Create outbox event for deletion within the same transaction
+                outbox_service.create_event(
+                    db=db,
+                    event_type="customer_deleted",
+                    aggregate_id=str(customer_id),
+                    aggregate_type="customer",
+                    payload=customer.model_dump(),
+                    partition_key=str(customer_id),  # Ensures message ordering
+                    metadata={
+                        "source": "customer_service",
+                        "method": "delete_customer_legacy", 
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+                )
+                
+            return deleted
     
     async def delete_customer_with_integrity(
         self,
