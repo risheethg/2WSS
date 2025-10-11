@@ -15,7 +15,6 @@ A production-ready, scalable two-way integration service that synchronizes custo
 - [Edge Cases & Resilience](#edge-cases--resilience)
 - [Code Structure](#code-structure)
 - [Monitoring & Admin](#monitoring--admin)
-- [Testing](#testing)
 - [Deployment](#deployment)
 - [Extensibility](#extensibility)
 - [Troubleshooting](#troubleshooting)
@@ -117,8 +116,6 @@ This service implements a **bi-directional, real-time synchronization system** b
 - ✅ **Conflict Resolution** - Handles data inconsistencies
 - ✅ **Data Reconciliation** - Periodic drift detection
 - ✅ **Circular Update Prevention** - Avoids infinite loops
-
-### Enterprise Features
 - ✅ **Admin Interfaces** - Monitoring and manual intervention
 - ✅ **Comprehensive Logging** - Structured logging throughout
 - ✅ **Health Checks** - Container and service health monitoring
@@ -160,14 +157,22 @@ nano .env
 
 ### 3. Start Services
 ```bash
-# Start all services
+# Start all services in background
 docker-compose up -d
+
+# Start services with logs (foreground)
+docker-compose up
 
 # Check service status
 docker-compose ps
 
-# View logs
+# View logs for all services
+docker-compose logs -f
+
+# View logs for specific service
 docker-compose logs -f app
+docker-compose logs -f worker
+docker-compose logs -f kafka
 ```
 
 ### 4. Initialize Database
@@ -657,50 +662,100 @@ logger.info("Customer created", extra={
 })
 ```
 
-## 🧪 Testing
+## 🐳 Docker Operations
 
-### Test Categories
+### Essential Docker Commands
 
-#### Unit Tests
+#### Starting the Application
 ```bash
-# Run unit tests
-pytest tests/unit/
+# Start all services in background
+docker-compose up -d
 
-# Coverage report
-pytest --cov=app tests/
+# Start with real-time logs  
+docker-compose up
+
+# Start specific services
+docker-compose up -d db kafka
+docker-compose up app worker
 ```
 
-#### Integration Tests  
+#### Monitoring Services
 ```bash
-# Test with real Kafka & Database
-pytest tests/integration/
+# Check running services
+docker-compose ps
 
-# Test Stripe integration (requires test API key)
-pytest tests/integration/test_stripe_integration.py
+# View all logs
+docker-compose logs -f
+
+# View specific service logs
+docker-compose logs -f app
+docker-compose logs -f worker
+docker-compose logs -f kafka
+docker-compose logs -f db
+
+# Follow logs from last 100 lines
+docker-compose logs --tail=100 -f app
 ```
 
-#### End-to-End Tests
+#### Managing Services
 ```bash
-# Full system tests
-pytest tests/e2e/
+# Stop all services
+docker-compose down
 
-# Test customer lifecycle
-pytest tests/e2e/test_customer_sync_flow.py
+# Stop and remove volumes (WARNING: deletes data)
+docker-compose down -v
+
+# Restart specific service
+docker-compose restart app
+docker-compose restart worker
+
+# Rebuild and restart
+docker-compose up --build app
 ```
 
-### Test Fixtures
-- **Database**: Isolated test database per test
-- **Kafka**: Test topics with cleanup
-- **Stripe**: Mock API responses for unit tests
-- **Time**: Frozen time for predictable testing
-
-### Load Testing
+#### Database Operations
 ```bash
-# Install k6
-# https://k6.io/docs/getting-started/installation/
+# Run database migrations
+docker-compose exec app alembic upgrade head
 
-# Run load tests
-k6 run tests/load/customer_creation_load.js
+# Connect to database
+docker-compose exec db psql -U zenskar_user -d zenskar_db
+
+# View database tables
+docker-compose exec db psql -U zenskar_user -d zenskar_db -c "\dt"
+
+# Backup database
+docker-compose exec db pg_dump -U zenskar_user zenskar_db > backup.sql
+```
+
+#### Kafka Operations
+```bash
+# List Kafka topics
+docker-compose exec kafka kafka-topics --bootstrap-server localhost:9092 --list
+
+# Create topic manually
+docker-compose exec kafka kafka-topics --bootstrap-server localhost:9092 --create --topic test_topic --partitions 3 --replication-factor 1
+
+# Consume messages from topic
+docker-compose exec kafka kafka-console-consumer --bootstrap-server localhost:9092 --topic customer_events --from-beginning
+```
+
+#### Troubleshooting
+```bash
+# Check service health
+docker-compose ps
+docker-compose exec app curl http://localhost:8000/health
+
+# Enter container for debugging
+docker-compose exec app bash
+docker-compose exec worker bash
+
+# Check container resource usage
+docker stats $(docker-compose ps -q)
+
+# View detailed service info
+docker-compose exec app python -c "import sys; print(sys.version)"
+docker-compose exec db pg_isready -U zenskar_user -d zenskar_db
 ```
 
 ## 🚀 Deployment
