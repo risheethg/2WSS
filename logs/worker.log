@@ -1,4 +1,0 @@
-2025-10-10 18:11:22,039 - kafka.cluster - WARNING - Topic customer_events is not available during auto-create initialization
-2025-10-10 18:11:26,930 - kafka.coordinator.assignors.range - WARNING - No partition metadata for topic customer_events
-2025-10-10 18:13:50,801 - kafka.cluster - WARNING - Topic customer_events is not available during auto-create initialization
-2025-10-10 18:13:55,566 - kafka.coordinator.assignors.range - WARNING - No partition metadata for topic customer_events
