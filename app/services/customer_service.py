@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError, DatabaseError
 
 from app.repos.customer_repo import customer_repo
 from app.repos.base import repository_registry
@@ -16,6 +16,19 @@ from app.core.transactions import CustomerTransactionContext, create_db_rollback
 from app.services.sync_service import sync_service
 from app.integrations.registry import integration_registry
 from app.core.logger import logger
+
+# Import enhanced database management modules
+from app.core.transaction_manager import (
+    transaction_manager, 
+    TransactionError, 
+    DeadlockError, 
+    ConnectionTimeoutError, 
+    ConstraintViolationError,
+    TransactionIsolationLevel
+)
+from app.core.constraint_handler import constraint_handler, ConstraintType
+from app.core.deadlock_detector import deadlock_detector
+from app.core.db_monitoring import db_monitor
 
 class CustomerService:
     def __init__(self):
@@ -41,12 +54,14 @@ class CustomerService:
         idempotency_key: str = None
     ) -> CustomerInDB:
         """
-        Create customer with full data integrity protection
+        Create customer with enhanced database integrity protection
         
         This method implements:
         - Email-based locking to prevent race conditions
         - Idempotency to prevent duplicate creations
-        - Distributed transactions with rollback
+        - Robust transaction management with deadlock recovery
+        - Connection timeout handling
+        - Constraint violation handling
         - Integration state tracking
         """
         await self.initialize()
@@ -56,101 +71,114 @@ class CustomerService:
                 "create_customer", f"email:{customer.email}"
             )
         
-        # Check for duplicate request
-        is_duplicate, existing_key = idempotency_service.is_duplicate_request(
-            db, idempotency_key, {"email": customer.email, "name": customer.name}
-        )
-        
-        if is_duplicate and existing_key:
-            if existing_key.status == "completed":
-                logger.info(f"Returning cached result for customer creation: {customer.email}")
-                return CustomerInDB(**existing_key.response_data["result"])
-            elif existing_key.status == "processing":
-                raise ValueError("Customer creation already in progress")
-        
-        # Create idempotency key
-        if not existing_key:
-            idempotency_service.create_idempotency_key(
-                db, idempotency_key, "create_customer", 
-                {"email": customer.email, "name": customer.name}
+        # Enhanced operation with database edge case handling
+        def create_customer_operation(session: Session) -> CustomerInDB:
+            """Database operation with comprehensive error handling."""
+            
+            # Check for duplicate request with constraint-aware logic
+            is_duplicate, existing_key = idempotency_service.is_duplicate_request(
+                session, idempotency_key, {"email": customer.email, "name": customer.name}
             )
+            
+            if is_duplicate and existing_key:
+                if existing_key.status == "completed":
+                    logger.info(f"Returning cached result for customer creation: {customer.email}")
+                    return CustomerInDB(**existing_key.response_data["result"])
+                elif existing_key.status == "processing":
+                    raise ValueError("Customer creation already in progress")
+            
+            # Create idempotency key if not exists
+            if not existing_key:
+                idempotency_service.create_idempotency_key(
+                    session, idempotency_key, "create_customer", 
+                    {"email": customer.email, "name": customer.name}
+                )
+            
+            # Validate email is not already taken (with soft-delete awareness)
+            self._validate_email_uniqueness_sync(session, customer.email)
+            
+            # Create customer with constraint handling
+            try:
+                created_customer = customer_repo.create(session, customer)
+                
+                # Create sync state
+                sync_service.create_sync_state(
+                    session, created_customer.id, "stripe", sync_status="pending"
+                )
+                
+                # Send to message queue (outside transaction for performance)
+                customer_data = created_customer.model_dump()
+                messaging.send_customer_event("customer_created", customer_data)
+                
+                # Mark idempotency key as completed
+                idempotency_service.update_idempotency_key(
+                    session, idempotency_key, "completed", 
+                    {"result": created_customer.model_dump()}
+                )
+                
+                return created_customer
+                
+            except IntegrityError as e:
+                # Enhanced constraint violation handling
+                constraint_detail = constraint_handler.handle_constraint_violation(
+                    session, e, "customer_creation"
+                )
+                
+                if constraint_detail.constraint_type == ConstraintType.UNIQUE:
+                    if "email" in (constraint_detail.column_name or ""):
+                        raise ValueError(f"Customer with email {customer.email} already exists")
+                    else:
+                        raise ValueError(f"Duplicate value: {constraint_detail.message}")
+                elif constraint_detail.constraint_type == ConstraintType.FOREIGN_KEY:
+                    raise ValueError(f"Referenced record not found: {constraint_detail.message}")
+                else:
+                    raise ValueError(f"Data validation error: {constraint_detail.message}")
+            
+            except Exception as e:
+                logger.error(f"Unexpected error in customer creation: {e}")
+                raise
         
-        # Use email-based distributed lock
+        # Use email-based distributed lock with enhanced transaction management
         async with email_lock(customer.email, timeout=30):
             try:
-                # Validate email is not already taken (with soft-delete awareness)
-                await self._validate_email_uniqueness(db, customer.email)
-                
-                # Create transaction context
-                transaction_id = f"create_customer_{uuid.uuid4().hex[:8]}"
-                
-                with CustomerTransactionContext(transaction_id) as tx_context:
-                    created_customer = None
-                    
-                    # Step 1: Create customer in database
-                    def create_in_db():
-                        nonlocal created_customer
-                        created_customer = customer_repo.create(db, customer)
-                        sync_service.create_sync_state(
-                            db, created_customer.id, "stripe", sync_status="pending"
-                        )
-                        return created_customer
-                    
-                    def rollback_db_create():
-                        if created_customer:
-                            customer_repo.delete(db, created_customer.id)
-                            sync_service.delete_sync_state(db, created_customer.id, "stripe")
-                    
-                    tx_context.add_local_db_step(
-                        "create_customer_db",
-                        create_in_db,
-                        rollback_db_create
+                # Execute with deadlock retry and connection timeout handling
+                with deadlock_detector.deadlock_retry_context(
+                    db, 
+                    operation_context="customer_creation",
+                    max_retries=3
+                ):
+                    result = transaction_manager.execute_with_retry(
+                        db=db,
+                        operation=create_customer_operation,
+                        max_retries=3,
+                        retry_on_deadlock=True,
+                        isolation_level=TransactionIsolationLevel.READ_COMMITTED
                     )
                     
-                    # Step 2: Send to message queue
-                    def send_to_queue():
-                        if created_customer:
-                            customer_data = created_customer.model_dump()
-                            messaging.send_customer_event("customer_created", customer_data)
-                        return True
+                    return result
                     
-                    def rollback_queue():
-                        # For queue operations, we rely on the worker's idempotency
-                        # and the sync state tracking to handle failures
-                        pass
-                    
-                    tx_context.add_integration_step(
-                        "send_create_event",
-                        send_to_queue,
-                        rollback_queue
-                    )
-                    
-                    # Execute transaction
-                    success = await tx_context.execute()
-                    
-                    if success and created_customer:
-                        # Mark idempotency key as completed
-                        idempotency_service.update_idempotency_key(
-                            db, idempotency_key, "completed", 
-                            {"result": created_customer.model_dump()}
-                        )
-                        
-                        logger.info(f"Customer created successfully with integrity protection: {customer.email}")
-                        return created_customer
-                    else:
-                        # Mark idempotency key as failed
-                        idempotency_service.update_idempotency_key(
-                            db, idempotency_key, "failed", 
-                            error_message="Transaction execution failed"
-                        )
-                        raise RuntimeError("Customer creation transaction failed")
-                        
+            except DeadlockError as e:
+                logger.error(f"Customer creation failed due to deadlock: {e}")
+                raise RuntimeError("Operation failed due to database contention. Please retry.")
+            
+            except ConnectionTimeoutError as e:
+                db_monitor.record_connection_timeout()
+                logger.error(f"Customer creation failed due to connection timeout: {e}")
+                raise RuntimeError("Database connection timeout. Please retry.")
+            
+            except ConstraintViolationError as e:
+                logger.warning(f"Customer creation failed due to constraint violation: {e}")
+                if e.constraint_type == "unique_constraint":
+                    raise ValueError("A customer with this information already exists")
+                else:
+                    raise ValueError(f"Data validation error: {e}")
+            
+            except TransactionError as e:
+                logger.error(f"Customer creation transaction failed: {e}")
+                raise RuntimeError("Database operation failed. Please retry.")
+            
             except Exception as e:
-                # Mark idempotency key as failed
-                idempotency_service.update_idempotency_key(
-                    db, idempotency_key, "failed", error_message=str(e)
-                )
-                logger.error(f"Customer creation failed: {e}")
+                logger.error(f"Unexpected error in customer creation: {e}")
                 raise
 
     def update_customer(self, db: Session, customer_id: int, customer_update: customer_model.CustomerUpdate) -> Optional[CustomerInDB]:
@@ -350,13 +378,13 @@ class CustomerService:
         """Get customer by Stripe ID"""
         return customer_repo.get_by_stripe_id(db, stripe_id)
     
-    async def _validate_email_uniqueness(
+    def _validate_email_uniqueness_sync(
         self,
         db: Session,
         email: str,
         exclude_id: int = None
     ):
-        """Validate that email is unique among active customers"""
+        """Synchronous email uniqueness validation for use within transactions"""
         # Check for active customers with this email
         query = db.query(customer_model.Customer).filter(
             customer_model.Customer.email == email,
@@ -369,6 +397,15 @@ class CustomerService:
         existing = query.first()
         if existing:
             raise ValueError(f"Email '{email}' is already taken by an active customer")
+    
+    async def _validate_email_uniqueness(
+        self,
+        db: Session,
+        email: str,
+        exclude_id: int = None
+    ):
+        """Validate that email is unique among active customers (async version)"""
+        self._validate_email_uniqueness_sync(db, email, exclude_id)
     
     def get_customer_sync_health(self, db: Session, customer_id: int) -> Dict[str, Any]:
         """Get sync health status for a customer across all integrations"""

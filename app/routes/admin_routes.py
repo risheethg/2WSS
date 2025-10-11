@@ -96,6 +96,95 @@ def cleanup_orphaned_records(
 
 
 # =============================================================================
+# DATABASE HEALTH MONITORING ENDPOINTS  
+# =============================================================================
+
+@router.get("/database/health")
+def get_database_health():
+    """Get comprehensive database health status and metrics"""
+    from app.core.db_monitoring import db_monitor
+    try:
+        dashboard_data = db_monitor.get_monitoring_dashboard()
+        return response_handler.success(
+            data=dashboard_data,
+            message="Database health status retrieved successfully"
+        )
+    except Exception as e:
+        logger.error(f"Error retrieving database health: {e}")
+        return response_handler.failure(message="Failed to retrieve database health", status_code=500)
+
+
+@router.get("/database/metrics")
+def get_database_metrics():
+    """Get detailed database performance metrics"""
+    from app.core.db_monitoring import db_monitor
+    try:
+        metrics = db_monitor.get_database_metrics()
+        return response_handler.success(
+            data=metrics.to_dict(),
+            message="Database metrics retrieved successfully"
+        )
+    except Exception as e:
+        logger.error(f"Error retrieving database metrics: {e}")
+        return response_handler.failure(message="Failed to retrieve database metrics", status_code=500)
+
+
+@router.post("/database/diagnostics")
+def run_database_diagnostics(db: Session = Depends(get_db)):
+    """Run comprehensive database diagnostics"""
+    from app.core.db_monitoring import db_monitor
+    try:
+        diagnostics = db_monitor.run_database_diagnostics(db)
+        return response_handler.success(
+            data=diagnostics,
+            message="Database diagnostics completed successfully"
+        )
+    except Exception as e:
+        logger.error(f"Error running database diagnostics: {e}")
+        return response_handler.failure(message="Failed to run database diagnostics", status_code=500)
+
+
+@router.get("/database/deadlocks")
+def get_deadlock_statistics():
+    """Get deadlock statistics and prevention recommendations"""
+    from app.core.deadlock_detector import deadlock_detector
+    try:
+        stats = deadlock_detector.get_deadlock_statistics(hours=24)
+        recommendations = deadlock_detector.get_deadlock_prevention_recommendations()
+        
+        return response_handler.success(
+            data={
+                "statistics": stats,
+                "prevention_recommendations": recommendations
+            },
+            message="Deadlock statistics retrieved successfully"
+        )
+    except Exception as e:
+        logger.error(f"Error retrieving deadlock statistics: {e}")
+        return response_handler.failure(message="Failed to retrieve deadlock statistics", status_code=500)
+
+
+@router.get("/database/connection-pool")
+def get_connection_pool_status():
+    """Get connection pool status and health"""
+    from app.core.database import DatabaseHealthChecker
+    try:
+        health_status = DatabaseHealthChecker.check_connection_health()
+        pool_status = DatabaseHealthChecker.get_pool_status()
+        
+        return response_handler.success(
+            data={
+                "health": health_status,
+                "pool_status": pool_status
+            },
+            message="Connection pool status retrieved successfully"
+        )
+    except Exception as e:
+        logger.error(f"Error retrieving connection pool status: {e}")
+        return response_handler.failure(message="Failed to retrieve connection pool status", status_code=500)
+
+
+# =============================================================================
 # DATA CONSISTENCY ENDPOINTS
 # =============================================================================
 
