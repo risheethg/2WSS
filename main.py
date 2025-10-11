@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from app.routes import customer_routes, webhook_routes 
+from app.routes import customer_routes, webhook_routes, admin_routes
 
 app = FastAPI(
     title="Zenskar Two-Way Integration Service",
@@ -8,6 +8,7 @@ app = FastAPI(
 
 app.include_router(customer_routes.router)
 app.include_router(webhook_routes.router)
+app.include_router(admin_routes.router)
 
 
 

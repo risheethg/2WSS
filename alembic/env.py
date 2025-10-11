@@ -14,13 +14,16 @@ load_dotenv()
 
 from app.core.database import Base
 from app.models import customer # This import is crucial
+from app.models import outbox  # Import outbox model for migrations
 from app.core.config import settings # Import your settings
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
 
-config.set_main_option('sqlalchemy.url', settings.DATABASE_URL)
+# Use localhost for migrations when running locally
+database_url = settings.DATABASE_URL.replace("db:", "localhost:")
+config.set_main_option('sqlalchemy.url', database_url)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
