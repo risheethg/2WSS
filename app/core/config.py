@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     CONFLICT_RESOLUTION_STRATEGY: str = "flag"  # flag, reject, merge, auto_rename
     AUTO_RESOLVE_CONFLICTS: bool = False        # Whether to auto-resolve simple conflicts
     
+    # Reconciliation configuration
+    RECONCILIATION_HOUR: int = 2        # Hour to run reconciliation (24-hour format)
+    RECONCILIATION_MINUTE: int = 0      # Minute to run reconciliation
+    RECONCILIATION_AUTO_RESOLVE: bool = True  # Auto-resolve simple mismatches during scheduled runs
+    
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding='utf-8', extra='ignore')
     
     def get_enabled_integrations(self) -> List[str]:
@@ -36,3 +41,7 @@ class Settings(BaseSettings):
         return [name.strip().lower() for name in self.ENABLED_INTEGRATIONS.split(",") if name.strip()]
 
 settings = Settings()
+
+def get_settings() -> Settings:
+    """Get application settings."""
+    return settings

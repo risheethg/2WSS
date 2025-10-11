@@ -93,6 +93,84 @@ class CustomerService:
         """Get customer by Stripe ID"""
         return customer_repo.get_by_stripe_id(db, stripe_id)
     
+    # Webhook-specific methods (DO NOT trigger outbound events to prevent sync loops)
+    
+    def update_customer_from_webhook(self, db: Session, customer_id: int, customer_update: customer_model.CustomerUpdate) -> Optional[CustomerInDB]:
+        """
+        Update customer from webhook data - DOES NOT trigger outbound events.
+        Use this method when processing inbound webhooks from Stripe to prevent sync loops.
+        """
+        try:
+            updated_customer = customer_repo.update(db, customer_id, customer_update)
+            if updated_customer:
+                # NOTE: Deliberately NOT adding to outbox to prevent circular updates
+                db.commit()
+            return updated_customer
+            
+        except Exception as e:
+            db.rollback()
+            raise
+    
+    def create_customer_from_webhook(self, db: Session, customer: customer_model.CustomerCreate) -> CustomerInDB:
+        """
+        Create customer from webhook data - DOES NOT trigger outbound events.
+        Use this method when processing inbound webhooks from Stripe to prevent sync loops.
+        """
+        try:
+            customer_in_db = customer_repo.create(db, customer)
+            # NOTE: Deliberately NOT adding to outbox to prevent circular updates
+            db.commit()
+            return customer_in_db
+            
+        except Exception as e:
+            db.rollback()
+            raise
+    
+    def update_stripe_id_from_webhook(self, db: Session, customer_id: int, stripe_customer_id: str) -> Optional[CustomerInDB]:
+        """
+        Update customer's Stripe ID from webhook - DOES NOT trigger outbound events.
+        Used during reconciliation or webhook processing.
+        """
+        try:
+            # Get the actual database model, not the response model
+            db_customer = db.query(customer_model.Customer).filter(
+                customer_model.Customer.id == customer_id
+            ).first()
+            
+            if db_customer:
+                db_customer.stripe_customer_id = stripe_customer_id
+                db.commit()
+                db.refresh(db_customer)
+                # Return as response model
+                return CustomerInDB.from_orm(db_customer)
+            return None
+            
+        except Exception as e:
+            db.rollback()
+            raise
+    
+    def deactivate_customer_from_webhook(self, db: Session, customer_id: int) -> Optional[CustomerInDB]:
+        """
+        Deactivate customer from webhook data - DOES NOT trigger outbound events.
+        Use this method when processing deletion webhooks from Stripe.
+        """
+        try:
+            # Get the actual database model, not the response model
+            db_customer = db.query(customer_model.Customer).filter(
+                customer_model.Customer.id == customer_id
+            ).first()
+            
+            if db_customer:
+                db_customer.is_active = False
+                db.commit()
+                db.refresh(db_customer)
+                # Return as response model
+                return CustomerInDB.from_orm(db_customer)
+            return None
+            
+        except Exception as e:
+            db.rollback()
+            raise
 
 
 customer_service = CustomerService()
