@@ -42,8 +42,9 @@ class StripeIntegration(BaseIntegrationService):
                 logger.info(f"Created Stripe customer {stripe_customer.id} and linked to local ID {local_customer_id}")
                 return {"stripe_customer_id": stripe_customer.id}
             else:
-                logger.error(f"Local customer with ID {local_customer_id} not found for Stripe linking")
-                return None
+                logger.warning(f"Local customer with ID {local_customer_id} not found for Stripe linking - customer may have been deleted")
+                # Still return success since Stripe customer was created successfully
+                return {"stripe_customer_id": stripe_customer.id}
                 
         except stripe.error.StripeError as e:
             logger.error(f"Stripe API error on create: {e}")
@@ -134,36 +135,57 @@ class StripeIntegration(BaseIntegrationService):
     def _handle_customer_upsert(self, stripe_customer: dict, db: Session) -> bool:
         try:
             stripe_customer_id = stripe_customer.get("id")
+            email = stripe_customer.get("email", "")
+            name = stripe_customer.get("name") or ""
             
             # Check if we already have this customer linked by Stripe ID
             customer = customer_repo.get_by_stripe_id(db, stripe_id=stripe_customer_id)
             
-            customer_data = customer_model.CustomerUpdate(
-                name=stripe_customer.get("name") or "",
-                email=stripe_customer.get("email") or ""
-            )
-
             if customer:
-                # Update the existing customer
+                # Update existing customer linked by Stripe ID
                 logger.info(f"Updating local customer {customer.id} from Stripe event.")
-                customer_repo.update_by_stripe_id(db, stripe_id=stripe_customer_id, customer_data=customer_data)
-            else:
-                # If not found by Stripe ID, check by email to link accounts
-                existing_by_email = customer_repo.get_by_email(db, email=customer_data.email)
-                if existing_by_email and not existing_by_email.stripe_customer_id:
-                    logger.info(f"Linking existing local customer {existing_by_email.id} to Stripe ID {stripe_customer_id}.")
-                    existing_by_email.stripe_customer_id = stripe_customer_id
-                    existing_by_email.name = customer_data.name
-                    existing_by_email.email = customer_data.email
+                try:
+                    customer.name = name
+                    # Only update email if it's different and not conflicting
+                    if email and email != customer.email:
+                        existing_email_customer = customer_repo.get_by_email(db, email=email)
+                        if existing_email_customer and existing_email_customer.id != customer.id:
+                            logger.warning(f"Cannot update customer {customer.id} email to {email} - already exists")
+                        else:
+                            customer.email = email
                     db.commit()
-                else:
-                    # If no customer exists, create a new one
-                    logger.info(f"Creating new local customer from Stripe event for {customer_data.email}.")
+                    logger.info(f"Successfully updated customer {customer.id}")
+                except Exception as update_error:
+                    db.rollback()
+                    logger.error(f"Failed to update customer {customer.id}: {update_error}")
+                    return False
+            else:
+                # Check if customer exists by email
+                existing_by_email = customer_repo.get_by_email(db, email=email) if email else None
+                
+                if existing_by_email:
+                    if not existing_by_email.stripe_customer_id:
+                        # Link existing customer to Stripe
+                        logger.info(f"Linking existing customer {existing_by_email.id} to Stripe ID {stripe_customer_id}")
+                        existing_by_email.stripe_customer_id = stripe_customer_id
+                        existing_by_email.name = name
+                        db.commit()
+                        logger.info(f"Successfully linked customer {existing_by_email.id}")
+                    else:
+                        logger.warning(f"Customer with email {email} already linked to Stripe ID {existing_by_email.stripe_customer_id}")
+                elif email:
+                    # Create new customer
+                    logger.info(f"Creating new customer from Stripe for {email}")
+                    customer_data = customer_model.CustomerCreate(name=name, email=email)
                     customer_repo.create_with_stripe_id(db, customer=customer_data, stripe_id=stripe_customer_id)
+                    logger.info(f"Successfully created customer for {email}")
+                else:
+                    logger.warning(f"Skipping Stripe customer {stripe_customer_id} - no email provided")
             
             return True
             
         except Exception as e:
+            db.rollback()
             logger.error(f"Error handling Stripe customer upsert: {e}")
             return False
 

@@ -80,12 +80,13 @@ async def handle_webhook(
         # Delegate to the integration service
         success = integration_service.handle_webhook_event(event_type, event_data, db)
         
-        if not success:
-            logger.error(f"Failed to process {integration_name} webhook event: {event_type}")
-            raise HTTPException(status_code=500, detail="Failed to process webhook event")
-
-        logger.info(f"Successfully processed {integration_name} webhook event: {event_type}")
-        return {"status": "success", "message": f"{integration_name} webhook event processed"}
+        if success:
+            logger.info(f"Successfully processed {integration_name} webhook event: {event_type}")
+            return {"status": "success", "message": f"{integration_name} webhook event processed"}
+        else:
+            # Log the failure but return 200 to prevent webhook retries for non-critical issues
+            logger.warning(f"Failed to process {integration_name} webhook event: {event_type} - returning success to prevent retries")
+            return {"status": "processed", "message": f"{integration_name} webhook event acknowledged but not processed"}
 
     except HTTPException:
         # Re-raise HTTP exceptions as they are already properly formatted
