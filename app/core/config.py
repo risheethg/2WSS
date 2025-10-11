@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     INITIAL_RETRY_DELAY: int = 2  # seconds
     MAX_RETRY_DELAY: int = 300    # seconds (5 minutes)
     
+    # Conflict resolution configuration
+    CONFLICT_RESOLUTION_STRATEGY: str = "flag"  # flag, reject, merge, auto_rename
+    AUTO_RESOLVE_CONFLICTS: bool = False        # Whether to auto-resolve simple conflicts
+    
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding='utf-8', extra='ignore')
     
     def get_enabled_integrations(self) -> List[str]:

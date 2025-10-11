@@ -15,6 +15,7 @@ load_dotenv()
 from app.core.database import Base
 from app.models import customer # This import is crucial
 from app.models import outbox  # Import outbox model for migrations
+from app.models import conflict  # Import conflict model for migrations
 from app.core.config import settings # Import your settings
 
 # this is the Alembic Config object, which provides
