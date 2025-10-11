@@ -149,7 +149,7 @@ cd Zenskar-Assignment-Back-End-Engineer-Intern
 ### 2. Environment Configuration
 ```bash
 # Copy environment template
-cp .env.example .env
+cp .env.template .env
 
 # Edit .env with your configuration
 nano .env
@@ -186,7 +186,7 @@ docker-compose exec db psql -U zenskar_user -d zenskar_db -c "\dt"
 
 ### 5. Test API
 ```bash
-# Check API health
+# Check API status
 curl http://localhost:8000/
 
 # Access API documentation
@@ -216,7 +216,7 @@ ngrok http 8000
 DATABASE_URL=postgresql://zenskar_user:zenskar_password@db:5432/zenskar_db
 
 # Kafka Configuration
-KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+KAFKA_BOOTSTRAP_SERVERS=kafka:29092
 KAFKA_CUSTOMER_TOPIC=customer_events
 KAFKA_DLQ_TOPIC=customer_events_dlq
 
@@ -549,7 +549,7 @@ def call_stripe_api():
 │       ├── admin_routes.py     # Admin/monitoring endpoints
 │       ├── conflict_routes.py  # Conflict management API
 │       ├── reconciliation_routes.py # Reconciliation API
-│       └── test_routes.py      # Development/testing endpoints
+│       └── debug_routes.py     # Development/debugging endpoints
 │
 ├── alembic/                     # Database migrations
 │   ├── versions/               # Migration files
@@ -617,9 +617,6 @@ class IntegrationRegistry:
 
 ### Monitoring Endpoints
 ```bash
-# System health
-GET /health
-
 # Detailed service status  
 GET /admin/status
 
@@ -744,7 +741,7 @@ docker-compose exec kafka kafka-console-consumer --bootstrap-server localhost:90
 ```bash
 # Check service health
 docker-compose ps
-docker-compose exec app curl http://localhost:8000/health
+docker-compose exec app curl http://localhost:8000/
 
 # Enter container for debugging
 docker-compose exec app bash
