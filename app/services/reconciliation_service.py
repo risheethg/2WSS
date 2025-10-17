@@ -208,11 +208,16 @@ class ReconciliationService:
                 )
                 
                 if auto_resolve:
-                    # Auto-resolve by updating local customer
-                    local_customer.stripe_customer_id = stripe_customer['id']
-                    self.db.commit()
-                    mismatch.resolved_at = datetime.utcnow()
-                    self.db.commit()
+                    # Auto-resolve by updating local customer using repository
+                    db_customer = self.customer_repo.get(self.db, local_customer.id)
+                    if db_customer:
+                        db_customer.stripe_customer_id = stripe_customer['id']
+                        self.db.commit()
+                        mismatch.resolved_at = datetime.utcnow()
+                        self.db.commit()
+                        logger.info(f"Auto-linked local customer {local_customer.id} with Stripe {stripe_customer['id']}")
+                    else:
+                        logger.error(f"Could not find local customer {local_customer.id} for linking")
                 
                 mismatches.append(mismatch)
             else:
@@ -350,23 +355,33 @@ class ReconciliationService:
     
     async def resolve_mismatch(self, mismatch_id: int, action: str) -> Optional[DataMismatch]:
         """Manually resolve a data mismatch with actual sync operations (ADDITIVE ONLY)."""
+        print(f"🔥 DEBUG: Resolving mismatch {mismatch_id} with action: {action}")
+        
         mismatch = self.mismatch_repo.get_by_id(mismatch_id)
         if not mismatch:
+            print(f"🔥 DEBUG: Mismatch {mismatch_id} not found")
             return None
+        
+        print(f"🔥 DEBUG: Found mismatch: type={mismatch.mismatch_type}, customer_id={mismatch.customer_id}, stripe_id={mismatch.stripe_customer_id}")
         
         try:
             # Perform actual sync operations based on action
             if action == "sync_to_local" and mismatch.mismatch_type == "missing_in_local":
+                print("🔥 DEBUG: Executing sync_to_local")
                 # Create customer in local database from Stripe data
                 await self._sync_stripe_to_local(mismatch)
                 
             elif action == "sync_to_stripe" and mismatch.mismatch_type == "missing_in_stripe":
+                print("🔥 DEBUG: Executing sync_to_stripe")
                 # Create customer in Stripe from local data
                 await self._sync_local_to_stripe(mismatch)
                 
             elif action == "link_existing":
+                print("🔥 DEBUG: Executing link_existing")
                 # Link existing customers by updating Stripe ID
                 await self._link_existing_customers(mismatch)
+            else:
+                print(f"🔥 DEBUG: No specific sync action for: {action} with mismatch type: {mismatch.mismatch_type}")
             
             # Mark as resolved
             mismatch.resolution_status = "manual_resolved"
@@ -374,7 +389,7 @@ class ReconciliationService:
             mismatch.resolved_at = datetime.utcnow()
             self.db.commit()
             
-            logger.info(f"Resolved mismatch {mismatch_id} with action: {action}")
+            print(f"🔥 DEBUG: Completed resolve_mismatch {mismatch_id} with action: {action}")
             return mismatch
             
         except Exception as e:
@@ -428,15 +443,22 @@ class ReconciliationService:
     
     async def _link_existing_customers(self, mismatch: DataMismatch):
         """Link existing customers by updating the local customer's Stripe ID."""
+        print(f"🔥 DEBUG: _link_existing_customers called - mismatch_id: {mismatch.id}, customer_id: {mismatch.customer_id}, stripe_id: {mismatch.stripe_customer_id}")
+        
         if not mismatch.customer_id or not mismatch.stripe_customer_id:
             raise ValueError("Need both customer IDs to link")
         
-        local_customer = self.customer_repo.get_by_id(self.db, mismatch.customer_id)
+        # Use the get method to get SQLAlchemy model, not Pydantic model
+        local_customer = self.customer_repo.get(self.db, mismatch.customer_id)
+        print(f"🔥 DEBUG: Retrieved customer: {local_customer.id if local_customer else 'None'}")
+        
         if not local_customer:
             raise ValueError(f"Local customer {mismatch.customer_id} not found")
         
         # Update local customer with Stripe ID
+        print(f"🔥 DEBUG: Setting stripe_customer_id from '{local_customer.stripe_customer_id}' to '{mismatch.stripe_customer_id}'")
         local_customer.stripe_customer_id = mismatch.stripe_customer_id
         self.db.commit()
+        print(f"🔥 DEBUG: Committed changes - new stripe_customer_id: {local_customer.stripe_customer_id}")
         
-        logger.info(f"Linked local customer {local_customer.id} with Stripe {mismatch.stripe_customer_id}")
+        print(f"🔥 DEBUG: Linked local customer {local_customer.id} with Stripe {mismatch.stripe_customer_id}")

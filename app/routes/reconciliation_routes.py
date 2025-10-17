@@ -15,6 +15,13 @@ from app.core.logger import logger
 router = APIRouter(prefix="/admin/reconciliation", tags=["reconciliation"])
 
 
+@router.get("/debug-test")
+async def debug_test():
+    """Test endpoint to verify code is loading correctly"""
+    print("🔥 DEBUG TEST ENDPOINT CALLED")
+    return {"debug": "This is the updated code with debug statements", "version": "v2.0"}
+
+
 @router.post("/run", response_model=dict)
 async def trigger_reconciliation(
     auto_resolve: bool = Query(True, description="Automatically resolve simple mismatches (ADDITIVE ONLY)"),
@@ -144,8 +151,11 @@ async def resolve_mismatch(
     **ADDITIVE ONLY**: No data will be deleted, only created or linked.
     """
     try:
+        print(f"🔥 ROUTE DEBUG: About to resolve mismatch {mismatch_id} with action {resolution_action}")
         reconciliation_service = ReconciliationService(db)
+        print(f"🔥 ROUTE DEBUG: Created reconciliation service")
         resolved_mismatch = await reconciliation_service.resolve_mismatch(mismatch_id, resolution_action)
+        print(f"🔥 ROUTE DEBUG: Called resolve_mismatch, result: {resolved_mismatch}")
         
         if not resolved_mismatch:
             raise HTTPException(status_code=404, detail="Mismatch not found")

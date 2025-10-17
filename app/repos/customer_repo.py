@@ -65,6 +65,9 @@ class CustomerRepo(BaseRepository[customer_model.Customer, customer_model.Custom
                 # Reactivate the deleted user
                 existing_customer.is_active = True
                 existing_customer.name = entity_data.name  # Update name in case it changed
+                # Update stripe_customer_id if provided
+                if entity_data.stripe_customer_id:
+                    existing_customer.stripe_customer_id = entity_data.stripe_customer_id
                 db.commit()
                 db.refresh(existing_customer)
                 return CustomerInDB.from_orm(existing_customer)
@@ -74,7 +77,11 @@ class CustomerRepo(BaseRepository[customer_model.Customer, customer_model.Custom
         
         # No existing customer, create new one
         try:
-            db_customer = customer_model.Customer(name=entity_data.name, email=entity_data.email)
+            db_customer = customer_model.Customer(
+                name=entity_data.name, 
+                email=entity_data.email,
+                stripe_customer_id=entity_data.stripe_customer_id
+            )
             db.add(db_customer)
             db.commit()
             db.refresh(db_customer)
