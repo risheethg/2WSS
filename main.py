@@ -22,9 +22,9 @@ app = FastAPI(
 app.include_router(customer_routes.router)
 app.include_router(webhook_routes.router)
 app.include_router(admin_routes.router)
-app.include_router(conflict_routes.router)
+#app.include_router(conflict_routes.router)
 app.include_router(reconciliation_routes.router)
-app.include_router(debug_routes.router)
+#app.include_router(debug_routes.router)
 
 
 

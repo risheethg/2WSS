@@ -12,7 +12,7 @@ from app.models.reconciliation import (
 from app.repos.reconciliation_repo import DataMismatchRepository
 from app.core.logger import logger
 
-router = APIRouter(prefix="/admin/reconciliation", tags=["reconciliation"])
+router = APIRouter(prefix="/admin/reconciliation", tags=["Admin - Reconciliation"])
 
 
 @router.get("/debug-test")
