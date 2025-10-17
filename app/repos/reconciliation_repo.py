@@ -54,11 +54,14 @@ class DataMismatchRepository:
     
     def resolve_mismatch(self, mismatch_id: int, resolution_action: str) -> Optional[DataMismatch]:
         """Mark a mismatch as resolved."""
+        from sqlalchemy import func
+        from datetime import datetime
+        
         mismatch = self.get_by_id(mismatch_id)
         if mismatch:
             mismatch.resolution_status = "manual_resolved"
             mismatch.resolution_action = resolution_action
-            mismatch.resolved_at = self.db.query(self.db.func.now()).scalar()
+            mismatch.resolved_at = datetime.utcnow()
             self.db.commit()
             self.db.refresh(mismatch)
         return mismatch
