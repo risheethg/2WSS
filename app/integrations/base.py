@@ -5,6 +5,7 @@ Base classes for third-party integrations.
 from abc import ABC, abstractmethod
 from sqlalchemy.orm import Session
 from typing import Dict, Any, Optional
+from app.core.logger import logger
 
 
 class OutwardIntegrationService(ABC):
@@ -46,7 +47,7 @@ class BaseIntegrationService(OutwardIntegrationService, InwardIntegrationService
     def __init__(self, name: str, enabled: bool = True):
         self.name = name
         self.enabled = enabled
-        print(f"{self.name.title()} Integration {'Enabled' if enabled else 'Disabled'}.")
+        logger.info(f"{self.name.title()} Integration {'Enabled' if enabled else 'Disabled'}.")
     
     @property
     def is_enabled(self) -> bool:
@@ -59,8 +60,8 @@ class BaseIntegrationService(OutwardIntegrationService, InwardIntegrationService
 
     def enable(self) -> None:
         self.enabled = True
-        print(f"{self.name.title()} Integration Enabled.")
+        logger.info(f"{self.name.title()} Integration Enabled.")
 
     def disable(self) -> None:
         self.enabled = False
-        print(f"{self.name.title()} Integration Disabled.")
+        logger.info(f"{self.name.title()} Integration Disabled.")

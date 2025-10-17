@@ -18,7 +18,7 @@ router = APIRouter(prefix="/admin/reconciliation", tags=["reconciliation"])
 @router.get("/debug-test")
 async def debug_test():
     """Test endpoint to verify code is loading correctly"""
-    print("🔥 DEBUG TEST ENDPOINT CALLED")
+    logger.info("Debug test endpoint called")
     return {"debug": "This is the updated code with debug statements", "version": "v2.0"}
 
 
@@ -151,11 +151,10 @@ async def resolve_mismatch(
     **ADDITIVE ONLY**: No data will be deleted, only created or linked.
     """
     try:
-        print(f"🔥 ROUTE DEBUG: About to resolve mismatch {mismatch_id} with action {resolution_action}")
+        logger.info(f"Resolving mismatch {mismatch_id} with action {resolution_action}")
         reconciliation_service = ReconciliationService(db)
-        print(f"🔥 ROUTE DEBUG: Created reconciliation service")
         resolved_mismatch = await reconciliation_service.resolve_mismatch(mismatch_id, resolution_action)
-        print(f"🔥 ROUTE DEBUG: Called resolve_mismatch, result: {resolved_mismatch}")
+        logger.info(f"Successfully resolved mismatch {mismatch_id}")
         
         if not resolved_mismatch:
             raise HTTPException(status_code=404, detail="Mismatch not found")

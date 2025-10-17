@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.integrations.stripe_service import StripeIntegration
 from app.repos.customer_repo import customer_repo
+from app.core.logger import logger
 
 router = APIRouter(prefix="/debug", tags=["Debug - Development Only"])
 
@@ -22,7 +23,7 @@ def test_delete_webhook(customer_id: int, db: Session = Depends(get_db)):
         if not customer.stripe_customer_id:
             raise HTTPException(status_code=400, detail=f"Customer {customer_id} has no Stripe ID")
         
-        print(f"🧪 BEFORE DELETE: Customer {customer_id} - Active: {customer.is_active}, Stripe ID: {customer.stripe_customer_id}")
+        logger.info(f"Testing delete webhook for customer {customer_id} - Active: {customer.is_active}, Stripe ID: {customer.stripe_customer_id}")
         
         # Simulate Stripe customer data for delete webhook
         stripe_customer_data = {
@@ -47,7 +48,7 @@ def test_delete_webhook(customer_id: int, db: Session = Depends(get_db)):
             "after_exists": customer_after is not None
         }
         
-        print(f"🧪 AFTER DELETE: Customer {customer_id} - Active: {customer_after.is_active if customer_after else 'N/A'}, Success: {success}")
+        logger.info(f"Delete webhook test completed - Customer {customer_id} - Active: {customer_after.is_active if customer_after else 'N/A'}, Success: {success}")
         
         return result
         
