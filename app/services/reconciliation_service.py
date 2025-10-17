@@ -23,14 +23,20 @@ class ReconciliationService:
         self.stripe_service = StripeIntegration()
         self.settings = get_settings()
     
-    async def run_reconciliation(self, auto_resolve: bool = False) -> ReconciliationReport:
+    async def run_reconciliation(self, auto_resolve: bool = False, 
+                               auto_sync_to_stripe: bool = False, 
+                               auto_sync_to_local: bool = False) -> ReconciliationReport:
         """
         Run a complete reconciliation between local customers and Stripe customers.
+        ADDITIVE ONLY - only creates missing data, never deletes.
         
         Args:
-            auto_resolve: If True, automatically resolve simple mismatches
+            auto_resolve: If True, automatically resolve simple mismatches (link existing customers)
+            auto_sync_to_stripe: If True, automatically create missing customers in Stripe
+            auto_sync_to_local: If True, automatically create missing customers locally
         """
-        logger.info("Starting customer data reconciliation")
+        logger.info(f"Starting ADDITIVE customer data reconciliation (auto_resolve={auto_resolve}, "
+                   f"sync_to_stripe={auto_sync_to_stripe}, sync_to_local={auto_sync_to_local})")
         
         # Create report
         report = self.reconciliation_repo.create_report()
@@ -57,13 +63,15 @@ class ReconciliationService:
             # Check for customers in local but not in Stripe (or mismatched)
             for local_customer in local_customers:
                 await self._check_local_customer(
-                    local_customer, stripe_by_email, stripe_by_id, report.id, mismatches, auto_resolve
+                    local_customer, stripe_by_email, stripe_by_id, report.id, mismatches, 
+                    auto_resolve, auto_sync_to_stripe
                 )
             
             # Check for customers in Stripe but not in local
             for stripe_customer in stripe_customers:
                 await self._check_stripe_customer(
-                    stripe_customer, local_by_email, local_by_stripe_id, report.id, mismatches
+                    stripe_customer, local_by_email, local_by_stripe_id, report.id, mismatches,
+                    auto_sync_to_local
                 )
             
             # Update report
@@ -132,23 +140,46 @@ class ReconciliationService:
     
     async def _check_local_customer(self, local_customer: Customer, 
                                   stripe_by_email: Dict, stripe_by_id: Dict, 
-                                  report_id: int, mismatches: List, auto_resolve: bool):
-        """Check a local customer against Stripe data."""
+                                  report_id: int, mismatches: List, auto_resolve: bool,
+                                  auto_sync_to_stripe: bool):
+        """Check a local customer against Stripe data. ADDITIVE ONLY - sync to Stripe if missing."""
         
         # Case 1: Local customer has Stripe ID - check if it exists and matches
         if local_customer.stripe_customer_id:
             stripe_customer = stripe_by_id.get(local_customer.stripe_customer_id)
             
             if not stripe_customer:
-                # Stripe customer was deleted or ID is invalid
+                # Stripe customer was deleted or ID is invalid - CREATE in Stripe (additive)
                 mismatch = self.mismatch_repo.create_mismatch(
                     report_id=report_id,
                     customer_id=local_customer.id,
                     stripe_customer_id=local_customer.stripe_customer_id,
                     email=local_customer.email,
                     mismatch_type="missing_in_stripe",
-                    resolution_status="pending"
+                    resolution_status="auto_resolved" if auto_sync_to_stripe else "pending",
+                    resolution_action="Create customer in Stripe" if auto_sync_to_stripe else None
                 )
+                
+                if auto_sync_to_stripe:
+                    # Auto-resolve by creating customer in Stripe
+                    try:
+                        new_stripe_customer = await self.stripe_service.create_customer({
+                            'email': local_customer.email,
+                            'name': local_customer.name,
+                            'metadata': {'local_id': str(local_customer.id)}
+                        })
+                        # Update local customer with new Stripe ID
+                        local_customer.stripe_customer_id = new_stripe_customer['id']
+                        self.db.commit()
+                        mismatch.resolved_at = datetime.utcnow()
+                        self.db.commit()
+                        logger.info(f"Auto-created customer in Stripe: {new_stripe_customer['id']}")
+                    except Exception as e:
+                        logger.error(f"Failed to create customer in Stripe: {e}")
+                        mismatch.resolution_status = "pending"
+                        mismatch.resolution_action = f"Failed to create in Stripe: {e}"
+                        self.db.commit()
+                
                 mismatches.append(mismatch)
                 return
             
@@ -185,20 +216,42 @@ class ReconciliationService:
                 
                 mismatches.append(mismatch)
             else:
-                # Customer exists locally but not in Stripe
+                # Customer exists locally but not in Stripe - CREATE in Stripe (additive)
                 mismatch = self.mismatch_repo.create_mismatch(
                     report_id=report_id,
                     customer_id=local_customer.id,
                     email=local_customer.email,
                     mismatch_type="missing_in_stripe",
-                    resolution_status="pending"
+                    resolution_status="auto_resolved" if auto_sync_to_stripe else "pending",
+                    resolution_action="Create customer in Stripe" if auto_sync_to_stripe else None
                 )
+                
+                if auto_sync_to_stripe:
+                    # Auto-resolve by creating customer in Stripe
+                    try:
+                        new_stripe_customer = await self.stripe_service.create_customer({
+                            'email': local_customer.email,
+                            'name': local_customer.name,
+                            'metadata': {'local_id': str(local_customer.id)}
+                        })
+                        # Update local customer with Stripe ID
+                        local_customer.stripe_customer_id = new_stripe_customer['id']
+                        self.db.commit()
+                        mismatch.resolved_at = datetime.utcnow()
+                        self.db.commit()
+                        logger.info(f"Auto-created customer in Stripe: {new_stripe_customer['id']}")
+                    except Exception as e:
+                        logger.error(f"Failed to create customer in Stripe: {e}")
+                        mismatch.resolution_status = "pending"
+                        mismatch.resolution_action = f"Failed to create in Stripe: {e}"
+                        self.db.commit()
+                
                 mismatches.append(mismatch)
     
     async def _check_stripe_customer(self, stripe_customer: Dict, 
                                    local_by_email: Dict, local_by_stripe_id: Dict, 
-                                   report_id: int, mismatches: List):
-        """Check a Stripe customer against local data."""
+                                   report_id: int, mismatches: List, auto_sync_to_local: bool):
+        """Check a Stripe customer against local data. ADDITIVE ONLY - sync to local if missing."""
         
         # Check if this Stripe customer exists locally
         local_customer = local_by_stripe_id.get(stripe_customer['id'])
@@ -208,14 +261,38 @@ class ReconciliationService:
             local_customer = local_by_email.get(stripe_customer['email'])
         
         if not local_customer:
-            # Customer exists in Stripe but not locally
+            # Customer exists in Stripe but not locally - CREATE locally (additive)
             mismatch = self.mismatch_repo.create_mismatch(
                 report_id=report_id,
                 stripe_customer_id=stripe_customer['id'],
                 email=stripe_customer.get('email', 'unknown'),
                 mismatch_type="missing_in_local",
-                resolution_status="pending"
+                resolution_status="auto_resolved" if auto_sync_to_local else "pending",
+                resolution_action="Create customer in local database" if auto_sync_to_local else None
             )
+            
+            if auto_sync_to_local:
+                # Auto-resolve by creating customer locally
+                try:
+                    from app.models.customer import CustomerCreate
+                    customer_data = CustomerCreate(
+                        email=stripe_customer.get('email', 'unknown@example.com'),
+                        name=stripe_customer.get('name', 'Unknown'),
+                        stripe_customer_id=stripe_customer['id']
+                    )
+                    
+                    new_customer = self.customer_repo.create(self.db, customer_data)
+                    mismatch.customer_id = new_customer.id
+                    mismatch.resolved_at = datetime.utcnow()
+                    self.db.commit()
+                    
+                    logger.info(f"Auto-created local customer {new_customer.id} from Stripe {stripe_customer['id']}")
+                except Exception as e:
+                    logger.error(f"Failed to create local customer: {e}")
+                    mismatch.resolution_status = "pending"
+                    mismatch.resolution_action = f"Failed to create locally: {e}"
+                    self.db.commit()
+            
             mismatches.append(mismatch)
     
     async def _compare_customer_fields(self, local_customer: Customer, stripe_customer: Dict,
@@ -272,5 +349,94 @@ class ReconciliationService:
         return self.reconciliation_repo.get_latest_reports(limit)
     
     async def resolve_mismatch(self, mismatch_id: int, action: str) -> Optional[DataMismatch]:
-        """Manually resolve a data mismatch."""
-        return self.mismatch_repo.resolve_mismatch(mismatch_id, action)
+        """Manually resolve a data mismatch with actual sync operations (ADDITIVE ONLY)."""
+        mismatch = self.mismatch_repo.get_by_id(mismatch_id)
+        if not mismatch:
+            return None
+        
+        try:
+            # Perform actual sync operations based on action
+            if action == "sync_to_local" and mismatch.mismatch_type == "missing_in_local":
+                # Create customer in local database from Stripe data
+                await self._sync_stripe_to_local(mismatch)
+                
+            elif action == "sync_to_stripe" and mismatch.mismatch_type == "missing_in_stripe":
+                # Create customer in Stripe from local data
+                await self._sync_local_to_stripe(mismatch)
+                
+            elif action == "link_existing":
+                # Link existing customers by updating Stripe ID
+                await self._link_existing_customers(mismatch)
+            
+            # Mark as resolved
+            mismatch.resolution_status = "manual_resolved"
+            mismatch.resolution_action = action
+            mismatch.resolved_at = datetime.utcnow()
+            self.db.commit()
+            
+            logger.info(f"Resolved mismatch {mismatch_id} with action: {action}")
+            return mismatch
+            
+        except Exception as e:
+            logger.error(f"Failed to resolve mismatch {mismatch_id}: {e}")
+            mismatch.resolution_status = "failed"
+            mismatch.resolution_action = f"Failed: {e}"
+            self.db.commit()
+            raise
+    
+    async def _sync_stripe_to_local(self, mismatch: DataMismatch):
+        """Create a local customer from Stripe data (ADDITIVE)."""
+        if not mismatch.stripe_customer_id:
+            raise ValueError("No Stripe customer ID to sync from")
+        
+        # Get customer data from Stripe
+        stripe_customer = stripe.Customer.retrieve(mismatch.stripe_customer_id)
+        
+        # Create local customer
+        from app.models.customer import CustomerCreate
+        customer_data = CustomerCreate(
+            email=stripe_customer.email or mismatch.email,
+            name=stripe_customer.name or "Unknown",
+            stripe_customer_id=stripe_customer.id
+        )
+        
+        new_customer = self.customer_repo.create(self.db, customer_data)
+        logger.info(f"Created local customer {new_customer.id} from Stripe {stripe_customer.id}")
+    
+    async def _sync_local_to_stripe(self, mismatch: DataMismatch):
+        """Create a Stripe customer from local data (ADDITIVE)."""
+        if not mismatch.customer_id:
+            raise ValueError("No local customer ID to sync from")
+        
+        # Get local customer
+        local_customer = self.customer_repo.get_by_id(self.db, mismatch.customer_id)
+        if not local_customer:
+            raise ValueError(f"Local customer {mismatch.customer_id} not found")
+        
+        # Create customer in Stripe
+        stripe_customer = await self.stripe_service.create_customer({
+            'email': local_customer.email,
+            'name': local_customer.name,
+            'metadata': {'local_id': str(local_customer.id)}
+        })
+        
+        # Update local customer with Stripe ID
+        local_customer.stripe_customer_id = stripe_customer['id']
+        self.db.commit()
+        
+        logger.info(f"Created Stripe customer {stripe_customer['id']} from local {local_customer.id}")
+    
+    async def _link_existing_customers(self, mismatch: DataMismatch):
+        """Link existing customers by updating the local customer's Stripe ID."""
+        if not mismatch.customer_id or not mismatch.stripe_customer_id:
+            raise ValueError("Need both customer IDs to link")
+        
+        local_customer = self.customer_repo.get_by_id(self.db, mismatch.customer_id)
+        if not local_customer:
+            raise ValueError(f"Local customer {mismatch.customer_id} not found")
+        
+        # Update local customer with Stripe ID
+        local_customer.stripe_customer_id = mismatch.stripe_customer_id
+        self.db.commit()
+        
+        logger.info(f"Linked local customer {local_customer.id} with Stripe {mismatch.stripe_customer_id}")

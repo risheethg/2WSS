@@ -17,29 +17,39 @@ router = APIRouter(prefix="/admin/reconciliation", tags=["reconciliation"])
 
 @router.post("/run", response_model=dict)
 async def trigger_reconciliation(
-    auto_resolve: bool = Query(False, description="Automatically resolve simple mismatches"),
+    auto_resolve: bool = Query(True, description="Automatically resolve simple mismatches (ADDITIVE ONLY)"),
+    sync_to_stripe: bool = Query(True, description="Auto-sync missing local customers to Stripe"),
+    sync_to_local: bool = Query(False, description="Auto-sync missing Stripe customers to local (requires manual approval)"),
     db: Session = Depends(get_db)
 ):
     """
     Manually trigger a reconciliation between local and Stripe customer data.
     
+    ADDITIVE RECONCILIATION - Only creates missing data, never deletes:
     - **auto_resolve**: If true, automatically fixes simple mismatches like missing Stripe IDs
+    - **sync_to_stripe**: If true, creates missing customers in Stripe from local data
+    - **sync_to_local**: If true, creates missing customers locally from Stripe data (use carefully)
     - Returns a summary of the reconciliation results
     """
     try:
         reconciliation_service = ReconciliationService(db)
-        report = await reconciliation_service.run_reconciliation(auto_resolve=auto_resolve)
+        report = await reconciliation_service.run_reconciliation(
+            auto_resolve=auto_resolve,
+            auto_sync_to_stripe=sync_to_stripe,
+            auto_sync_to_local=sync_to_local
+        )
         
         return {
             "success": True,
-            "message": "Reconciliation completed successfully",
+            "message": "Reconciliation completed successfully (ADDITIVE MODE)",
             "report_id": report.id,
             "total_local_customers": report.total_local_customers,
             "total_stripe_customers": report.total_stripe_customers,
             "mismatches_found": report.mismatches_found,
             "auto_resolved": report.auto_resolved,
             "manual_review_needed": report.manual_review_needed,
-            "status": report.status
+            "status": report.status,
+            "note": "Reconciliation is ADDITIVE ONLY - no data was deleted"
         }
     
     except Exception as e:
@@ -118,14 +128,20 @@ async def get_pending_mismatches(
 @router.post("/mismatches/{mismatch_id}/resolve", response_model=dict)
 async def resolve_mismatch(
     mismatch_id: int,
-    resolution_action: str = Query(..., description="Description of the resolution action taken"),
+    resolution_action: str = Query(..., description="Action: sync_to_local, sync_to_stripe, link_existing, or custom description"),
     db: Session = Depends(get_db)
 ):
     """
-    Mark a data mismatch as manually resolved.
+    Resolve a data mismatch with actual sync operations (ADDITIVE ONLY).
     
     - **mismatch_id**: ID of the mismatch to resolve
-    - **resolution_action**: Description of what action was taken to resolve the mismatch
+    - **resolution_action**: 
+      - "sync_to_local": Create customer in local DB from Stripe data
+      - "sync_to_stripe": Create customer in Stripe from local data  
+      - "link_existing": Link existing customers by updating Stripe ID
+      - Custom description for manual resolution
+      
+    **ADDITIVE ONLY**: No data will be deleted, only created or linked.
     """
     try:
         reconciliation_service = ReconciliationService(db)
@@ -136,10 +152,11 @@ async def resolve_mismatch(
         
         return {
             "success": True,
-            "message": "Mismatch marked as resolved",
+            "message": "Mismatch resolved with sync operation (ADDITIVE ONLY)",
             "mismatch_id": mismatch_id,
             "resolution_action": resolution_action,
-            "resolved_at": resolved_mismatch.resolved_at.isoformat() if resolved_mismatch.resolved_at else None
+            "resolved_at": resolved_mismatch.resolved_at.isoformat() if resolved_mismatch.resolved_at else None,
+            "note": "No data was deleted - only created or linked"
         }
     
     except HTTPException:
