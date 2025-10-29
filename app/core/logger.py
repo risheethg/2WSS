@@ -127,14 +127,14 @@ def create_logger(env, logger_name, log_directory, log_file):
 
 logger = create_logger(
     env=settings.LOGGER,
-    logger_name="Zenskar",
+    logger_name="AppLogger",
     log_directory="logs",
     log_file="app.log",
 )
 
 worker_logger = create_logger(
     env="WARNING",
-    logger_name="ZenskarWorker",
+    logger_name="AppWorker",
     log_directory="logs",
     log_file="worker.log",
 )

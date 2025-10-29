@@ -39,7 +39,7 @@ class Settings(BaseSettings):
         if not self.ENABLED_INTEGRATIONS:
             return []
         return [name.strip().lower() for name in self.ENABLED_INTEGRATIONS.split(",") if name.strip()]
-
+        
 settings = Settings()
 
 def get_settings() -> Settings:

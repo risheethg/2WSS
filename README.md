@@ -1,4 +1,4 @@
-# Zenskar Two-Way Integration Service
+# Two-Way Integration Service
 
 A production-ready, scalable two-way integration service that synchronizes customer data between your application and external services (Stripe, Salesforce, etc.) with comprehensive error handling, conflict resolution, and monitoring capabilities.
 
@@ -192,7 +192,7 @@ This service implements a **bi-directional, real-time synchronization system** b
 ### 1. Clone Repository
 ```bash
 git clone <repository-url>
-cd Zenskar-Assignment-Back-End-Engineer-Intern
+cd Two-Way-Sync-Service
 ```
 
 ### 2. Environment Configuration
@@ -230,7 +230,7 @@ docker-compose logs -f kafka
 docker-compose exec app alembic upgrade head
 
 # Verify tables created
-docker-compose exec db psql -U zenskar_user -d zenskar_db -c "\dt"
+docker-compose exec db psql -U _user -d _db -c "\dt"
 ```
 
 ### 5. Test API
@@ -262,7 +262,7 @@ ngrok http 8000
 
 ```bash
 # Database Configuration
-DATABASE_URL=postgresql://zenskar_user:zenskar_password@db:5432/zenskar_db
+DATABASE_URL=postgresql://_user:_password@db:5432/_db
 
 # Kafka Configuration
 KAFKA_BOOTSTRAP_SERVERS=kafka:29092
@@ -765,13 +765,13 @@ docker-compose up --build app
 docker-compose exec app alembic upgrade head
 
 # Connect to database
-docker-compose exec db psql -U zenskar_user -d zenskar_db
+docker-compose exec db psql -U _user -d _db
 
 # View database tables
-docker-compose exec db psql -U zenskar_user -d zenskar_db -c "\dt"
+docker-compose exec db psql -U _user -d _db -c "\dt"
 
 # Backup database
-docker-compose exec db pg_dump -U zenskar_user zenskar_db > backup.sql
+docker-compose exec db pg_dump -U _user _db > backup.sql
 ```
 
 #### Kafka Operations
@@ -801,7 +801,7 @@ docker stats $(docker-compose ps -q)
 
 # View detailed service info
 docker-compose exec app python -c "import sys; print(sys.version)"
-docker-compose exec db pg_isready -U zenskar_user -d zenskar_db
+docker-compose exec db pg_isready -U _user -d _db
 ```
 
 ## Deployment
@@ -814,7 +814,7 @@ docker-compose exec db pg_isready -U zenskar_user -d zenskar_db
 version: '3.8'
 services:
   app:
-    image: your-registry/zenskar-integration:latest
+    image: your-registry/-integration:latest
     environment:
       - ENVIRONMENT=production
       - LOG_LEVEL=INFO
@@ -827,17 +827,17 @@ services:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: zenskar-integration
+  name: -integration
 spec:
   replicas: 3
   selector:
     matchLabels:
-      app: zenskar-integration
+      app: -integration
   template:
     spec:
       containers:
       - name: app
-        image: your-registry/zenskar-integration:latest
+        image: your-registry/-integration:latest
         env:
         - name: DATABASE_URL
           valueFrom:
@@ -854,7 +854,7 @@ spec:
 DEBUG=true
 LOG_LEVEL=DEBUG
 STRIPE_API_KEY=sk_test_...
-DATABASE_URL=postgresql://localhost:5432/zenskar_dev
+DATABASE_URL=postgresql://localhost:5432/_dev
 ```
 
 #### Staging
@@ -863,7 +863,7 @@ DATABASE_URL=postgresql://localhost:5432/zenskar_dev
 DEBUG=false
 LOG_LEVEL=INFO
 STRIPE_API_KEY=sk_test_...
-DATABASE_URL=postgresql://staging-db:5432/zenskar_staging
+DATABASE_URL=postgresql://staging-db:5432/_staging
 ```
 
 #### Production
@@ -872,7 +872,7 @@ DATABASE_URL=postgresql://staging-db:5432/zenskar_staging
 DEBUG=false
 LOG_LEVEL=WARNING
 STRIPE_API_KEY=sk_live_...
-DATABASE_URL=postgresql://prod-db:5432/zenskar_prod
+DATABASE_URL=postgresql://prod-db:5432/_prod
 ```
 
 ### Security Considerations
