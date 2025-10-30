@@ -30,7 +30,7 @@ services:
 
   db:
     image: postgres:15
-    container_name: zenskar_db
+    container_name: _db
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -47,7 +47,7 @@ services:
 
   app:
     build: .
-    container_name: zenskar_app
+    container_name: _app
     env_file:
       - .env
     environment:

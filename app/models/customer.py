@@ -19,7 +19,7 @@ class CustomerBase(BaseModel):
     email: EmailStr
 
 class CustomerCreate(CustomerBase):
-    pass
+    stripe_customer_id: Optional[str] = None
 
 class CustomerUpdate(CustomerBase):
     pass

@@ -1,9 +1,3 @@
-"""
-Conflict Resolution Models
-
-Tracks data conflicts that occur during webhook processing for manual resolution.
-"""
-
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, Enum
 from pydantic import BaseModel
 from typing import Optional, Dict, Any

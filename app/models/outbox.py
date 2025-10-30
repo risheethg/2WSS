@@ -1,10 +1,3 @@
-"""
-Outbox Event Model
-
-Implements the Transactional Outbox Pattern to ensure events are only
-published to Kafka if the database transaction succeeds.
-"""
-
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text
 from pydantic import BaseModel
 from typing import Optional, Dict, Any

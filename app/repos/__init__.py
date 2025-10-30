@@ -1,10 +1,3 @@
-"""
-Repository Setup and Registry
-
-Initialize and register all repository implementations in your existing repos/ folder.
-Adding a new entity type is as simple as importing it here!
-"""
-
 from app.repos.base import repository_registry
 from app.repos.customer_repo import customer_repo  
 # from app.repos.invoice_repo import invoice_repo  # Uncomment when you need invoices

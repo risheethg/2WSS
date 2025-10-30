@@ -53,6 +53,11 @@ class ReconciliationScheduler:
                 if now > target_datetime:
                     target_datetime = target_datetime.replace(day=target_datetime.day + 1)
                 
+                # For frequent testing: run every 10 minutes
+                # Comment out for daily schedule, uncomment for testing
+                # seconds_until_run = 600  # 10 minutes
+                
+                # Original daily schedule:
                 # Calculate seconds until next run
                 seconds_until_run = (target_datetime - now).total_seconds()
                 
